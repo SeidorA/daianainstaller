@@ -124,8 +124,59 @@ install_prereq_packages() {
   esac
 }
 
+install_docker_linux() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    log "Docker already installed: $(docker --version)"
+    return 0
+  fi
+
+  case "$(uname -s 2>/dev/null || true)" in
+    Linux*) ;;
+    *) return 1 ;;
+  esac
+
+  command -v apt-get >/dev/null 2>&1 || return 1
+
+  log "Installing Docker Engine and Compose plugin"
+  local docker_os_id docker_codename docker_arch
+  if [ -f /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    docker_os_id="${ID:-}"
+    docker_codename="${VERSION_CODENAME:-}"
+  fi
+  [ -n "$docker_os_id" ] || return 1
+  docker_arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+
+  if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+    sudo apt-get update -qq -y
+    sudo apt-get install -qq -y ca-certificates curl gnupg lsb-release
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/${docker_os_id}/gpg"       | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    docker_codename="${docker_codename:-$(lsb_release -cs 2>/dev/null || echo stable)}"
+    echo "deb [arch=${docker_arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${docker_os_id} ${docker_codename} stable"       | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+    sudo apt-get update -qq -y
+    sudo apt-get install -qq -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo systemctl enable --now docker || warn "Could not enable docker via systemctl; start it manually."
+  else
+    apt-get update -qq -y
+    apt-get install -qq -y ca-certificates curl gnupg lsb-release
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/${docker_os_id}/gpg"       | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    docker_codename="${docker_codename:-$(lsb_release -cs 2>/dev/null || echo stable)}"
+    echo "deb [arch=${docker_arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${docker_os_id} ${docker_codename} stable"       > /etc/apt/sources.list.d/docker.list
+    apt-get update -qq -y
+    apt-get install -qq -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    systemctl enable --now docker || warn "Could not enable docker via systemctl; start it manually."
+  fi
+
+  docker compose version >/dev/null 2>&1 || die "Docker installation finished but 'docker compose' is still unavailable."
+}
+
 ensure_prerequisites() {
-  local missing=() installable=() manual=() pkg_mgr=""
+  local missing=() installable=() manual=() pkg_mgr="" need_docker=0
   local cmd
 
   for cmd in git curl jq openssl docker psql supabase; do
@@ -159,12 +210,16 @@ ensure_prerequisites() {
         installable+=("$cmd")
         ;;
       docker)
-        manual+=("$cmd")
+        if [ "$pkg_mgr" = "apt" ]; then
+          need_docker=1
+        else
+          manual+=("$cmd")
+        fi
         ;;
     esac
   done
 
-  if [ "${#installable[@]}" -gt 0 ] && [ -n "$pkg_mgr" ] && [ -t 0 ] && [ -r /dev/tty ]; then
+  if { [ "${#installable[@]}" -gt 0 ] || [ "$need_docker" = "1" ]; } && [ -n "$pkg_mgr" ] && [ -t 0 ] && [ -r /dev/tty ]; then
     local pretty=()
     for cmd in "${installable[@]}"; do
       case "$pkg_mgr:$cmd" in
@@ -177,10 +232,20 @@ ensure_prerequisites() {
         *) pretty+=("$cmd") ;;
       esac
     done
+    if [ "$need_docker" = "1" ]; then
+      pretty+=("docker (engine + compose)")
+    fi
     if prompt_yes_no "Install missing prerequisites via $pkg_mgr: ${pretty[*]}?"; then
       CURRENT_PHASE="installing prerequisites"
-      if ! install_prereq_packages "$pkg_mgr" "${installable[@]}"; then
-        die "Could not install prerequisites via $pkg_mgr"
+      if [ "${#installable[@]}" -gt 0 ]; then
+        if ! install_prereq_packages "$pkg_mgr" "${installable[@]}"; then
+          die "Could not install prerequisites via $pkg_mgr"
+        fi
+      fi
+      if [ "$need_docker" = "1" ]; then
+        if ! install_docker_linux; then
+          die "Could not install Docker via $pkg_mgr"
+        fi
       fi
       log "Prerequisites installed"
       if [ "$pkg_mgr" = "brew" ]; then

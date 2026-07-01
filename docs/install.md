@@ -5,7 +5,7 @@ bash install-daiana.sh
 ```
 
 What it does:
-- validates prerequisites
+- validates prerequisites and can auto-install missing Linux dependencies with approval (including Docker Engine + Compose plugin)
 - creates or restores `.env`
 - seeds Supabase keys when needed
 - asks for core credentials in logical groups
