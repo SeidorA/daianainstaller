@@ -1031,13 +1031,13 @@ run_supabase_init_sql() {
       *vault.sql)
         local -a vault_psql_vars=(
           supabase_public_url "$SUPABASE_PUBLIC_URL"
-          next_public_api_python "$BACKEND_BASE_URL"
-          next_public_api_training "$VANNA_BASE_URL"
-          next_public_api_qdrant "$QDRANT_BASE_URL"
-          next_public_api_msteams "$MS_BASE_URL"
-          next_public_api_whatsapp "$WS_BASE_URL"
-          next_public_api_studio_base_url "$STUDIO_BASE_URL"
-          next_public_webui_url "$WEBUI_BASE_URL"
+          backend_base_url "$BACKEND_BASE_URL"
+          vanna_base_url "$VANNA_BASE_URL"
+          qdrant_base_url "$QDRANT_BASE_URL"
+          ms_base_url "$MS_BASE_URL"
+          ws_base_url "$WS_BASE_URL"
+          studio_base_url "$STUDIO_BASE_URL"
+          webui_base_url "$WEBUI_BASE_URL"
           next_public_app_url "$NEXT_PUBLIC_APP_URL"
           cors_allow_origin "$CORS_ALLOW_ORIGIN"
         )

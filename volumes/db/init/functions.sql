@@ -1033,7 +1033,7 @@ begin
 end;
 $$;
 
-ALTER FUNCTION "public"."match_documents"("query_embedding" "extensions"."vector", "filter" "jsonb") OWNER TO postgres
+ALTER FUNCTION "public"."match_documents"("query_embedding" "extensions"."vector", "filter" "jsonb") OWNER TO postgres;
 
 CREATE OR REPLACE FUNCTION "public"."trigger_get_question_and_answer"() RETURNS "trigger"
     LANGUAGE "plpgsql"
