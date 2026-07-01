@@ -156,13 +156,51 @@ install_supabase_cli() {
     esac
 }
 
+docker_cmd() {
+    if command docker info >/dev/null 2>&1; then
+        command docker "$@"
+        return $?
+    fi
+    if [ -n "$SUDO" ]; then
+        $SUDO docker "$@"
+    else
+        command docker "$@"
+    fi
+}
+
+ensure_docker_group_access() {
+    target_user="${SUDO_USER:-$(id -un)}"
+
+    getent group docker >/dev/null 2>&1 || {
+        if [ -n "$SUDO" ]; then
+            $SUDO groupadd docker >/dev/null 2>&1 || true
+        else
+            groupadd docker >/dev/null 2>&1 || true
+        fi
+    }
+
+    if id -nG "$target_user" 2>/dev/null | tr ' ' '
+' | grep -qx docker; then
+        return 0
+    fi
+
+    if [ -n "$SUDO" ]; then
+        $SUDO usermod -aG docker "$target_user" >/dev/null 2>&1 || true
+    else
+        usermod -aG docker "$target_user" >/dev/null 2>&1 || true
+    fi
+
+    log "Added $target_user to the docker group. Log out and back in for direct docker access without sudo."
+}
+
 docker_present() {
-    command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+    command -v docker >/dev/null 2>&1 && docker_cmd compose version >/dev/null 2>&1
 }
 
 install_docker() {
     if docker_present; then
         log "Docker already installed: $(docker --version)"
+        ensure_docker_group_access
         return 0
     fi
 
@@ -202,6 +240,7 @@ install_docker() {
     log "Enabling and starting docker service"
     $SUDO systemctl enable --now docker || warn "Could not enable docker via systemctl; start it manually."
 
+    ensure_docker_group_access
     docker_present || die "Docker installation finished but 'docker compose' is still unavailable."
 }
 
@@ -354,7 +393,7 @@ log "Generating asymmetric key pair and opaque API keys"
 bash utils/add-new-auth-keys.sh --update-env
 
 log "Pulling Docker images"
-docker compose pull || warn "docker compose pull failed; you can retry later."
+docker_cmd compose pull || warn "docker compose pull failed; you can retry later."
 
 echo ""
 echo "Setup complete. Project ready at: $(pwd)"

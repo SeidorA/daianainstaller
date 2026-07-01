@@ -25,6 +25,18 @@ node_ok() {
     [ -n "$major" ] && [ "$major" -ge 16 ] 2>/dev/null
 }
 
+docker_cmd() {
+    if command docker info >/dev/null 2>&1; then
+        command docker "$@"
+        return $?
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+        sudo docker "$@"
+    else
+        command docker "$@"
+    fi
+}
+
 # Resolve how to run node: local install (>= 16) preferred, docker fallback.
 if node_ok; then
     node_runner="node"
@@ -38,17 +50,17 @@ else
         exit 1
     fi
 
-    if ! docker info >/dev/null 2>&1; then
-        echo "Error: docker is installed but the daemon is not running."
+    if ! docker_cmd info >/dev/null 2>&1; then
+        echo "Error: docker is installed but the daemon is not reachable (or your user cannot access /var/run/docker.sock). Add your user to the docker group and log out/in, or rerun with sudo."
         exit 1
     fi
 
-    if ! docker image inspect node:22-alpine >/dev/null 2>&1; then
+    if ! docker_cmd image inspect node:22-alpine >/dev/null 2>&1; then
         echo "Pulling node:22-alpine (first-run only)..."
-        docker pull node:22-alpine
+        docker_cmd pull node:22-alpine
     fi
 
-    node_runner="docker run --rm node:22-alpine node"
+    node_runner="docker_cmd run --rm node:22-alpine node"
 fi
 
 # Read JWT_SECRET from .env

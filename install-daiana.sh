@@ -72,6 +72,45 @@ install_supabase_cli() {
   esac
 }
 
+  docker_cmd() {
+    if command docker info >/dev/null 2>&1; then
+      command docker "$@"
+      return $?
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+      sudo docker "$@"
+    else
+      command docker "$@"
+    fi
+  }
+
+  ensure_docker_group_access() {
+    local target_user="${SUDO_USER:-${USER:-}}"
+    local group_name="docker"
+
+    [ -n "$target_user" ] || return 0
+
+    if ! getent group "$group_name" >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+        sudo groupadd "$group_name" 2>/dev/null || true
+      else
+        groupadd "$group_name" 2>/dev/null || true
+      fi
+    fi
+
+    if id -nG "$target_user" 2>/dev/null | tr " " "\n" | grep -qx "$group_name"; then
+      return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+      sudo usermod -aG "$group_name" "$target_user" || return 0
+    else
+      usermod -aG "$group_name" "$target_user" || return 0
+    fi
+
+    log "Added $target_user to the docker group. Log out and back in for direct docker access without sudo."
+  }
+
 install_prereq_packages() {
   local pkg_mgr="$1"
   shift
@@ -125,9 +164,12 @@ install_prereq_packages() {
 }
 
 install_docker_linux() {
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    log "Docker already installed: $(docker --version)"
-    return 0
+  if command -v docker >/dev/null 2>&1; then
+    if docker_cmd compose version >/dev/null 2>&1; then
+      log "Docker already installed: $(docker --version)"
+      ensure_docker_group_access
+      return 0
+    fi
   fi
 
   case "$(uname -s 2>/dev/null || true)" in
@@ -172,7 +214,8 @@ install_docker_linux() {
     systemctl enable --now docker || warn "Could not enable docker via systemctl; start it manually."
   fi
 
-  docker compose version >/dev/null 2>&1 || die "Docker installation finished but 'docker compose' is still unavailable."
+  ensure_docker_group_access
+  docker_cmd compose version >/dev/null 2>&1 || die "Docker installation finished but 'docker compose' is still unavailable."
 }
 
 ensure_prerequisites() {
@@ -186,8 +229,8 @@ ensure_prerequisites() {
   done
 
   if command -v docker >/dev/null 2>&1; then
-    if docker compose version >/dev/null 2>&1; then
-      COMPOSE_CMD=(docker compose)
+    if docker_cmd compose version >/dev/null 2>&1; then
+      COMPOSE_CMD=(docker_cmd compose)
     elif command -v docker-compose >/dev/null 2>&1; then
       COMPOSE_CMD=(docker-compose)
     else
@@ -263,8 +306,8 @@ ensure_prerequisites() {
         command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
       done
       if command -v docker >/dev/null 2>&1; then
-        if docker compose version >/dev/null 2>&1; then
-          COMPOSE_CMD=(docker compose)
+        if docker_cmd compose version >/dev/null 2>&1; then
+          COMPOSE_CMD=(docker_cmd compose)
         elif command -v docker-compose >/dev/null 2>&1; then
           COMPOSE_CMD=(docker-compose)
         else
@@ -916,9 +959,9 @@ portainer_upsert_stack() {
 }
 
 ensure_network() {
-  if ! docker network inspect daiana-mgmt >/dev/null 2>&1; then
+  if ! docker_cmd network inspect daiana-mgmt >/dev/null 2>&1; then
     log "Creating shared network daiana-mgmt"
-    docker network create daiana-mgmt >/dev/null
+    docker_cmd network create daiana-mgmt >/dev/null
   fi
 }
 
@@ -999,7 +1042,7 @@ SUPABASE_CORE_CONTAINERS=(
 
 container_health_status() {
   local name="$1"
-  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{if .State.Running}}running{{else}}{{.State.Status}}{{end}}{{end}}' "$name" 2>/dev/null || true
+  docker_cmd inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{if .State.Running}}running{{else}}{{.State.Status}}{{end}}{{end}}' "$name" 2>/dev/null || true
 }
 
 wait_for_supabase_ready() {
@@ -1057,12 +1100,12 @@ run_psql_file() {
   done
 
   if [ "$schema" != "-" ] && [ -n "$schema" ]; then
-    tables="$(docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -Atqc "SELECT string_agg(format('%I.%I', schemaname, tablename), ', ') FROM pg_tables WHERE schemaname = '$schema';")"
+    tables="$(docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -Atqc "SELECT string_agg(format('%I.%I', schemaname, tablename), ', ') FROM pg_tables WHERE schemaname = '$schema';")"
     if [ -n "$tables" ]; then
-      docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "TRUNCATE $tables RESTART IDENTITY CASCADE"
+      docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "TRUNCATE $tables RESTART IDENTITY CASCADE"
     fi
   fi
-  docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" "${psql_vars[@]}" -v ON_ERROR_STOP=1 -f /dev/stdin < "$file"
+  docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" "${psql_vars[@]}" -v ON_ERROR_STOP=1 -f /dev/stdin < "$file"
 }
 
 run_supabase_init_sql() {
@@ -1152,7 +1195,7 @@ report_daiana_versions() {
   log "Checking Daiana image versions"
   local service container target current
   while IFS='|' read -r service container target; do
-    current="$(docker inspect --format '{{.Config.Image}}' "$container" 2>/dev/null || true)"
+    current="$(docker_cmd inspect --format '{{.Config.Image}}' "$container" 2>/dev/null || true)"
     [ -n "$current" ] || current="missing"
     log "$service: current=$current target=$target"
   done <<'EOF'
