@@ -72,6 +72,35 @@ install_supabase_cli() {
   esac
 }
 
+ensure_supabase_cli_on_path() {
+  local target_user candidate home
+  if command -v supabase >/dev/null 2>&1; then
+    return 0
+  fi
+
+  target_user="${SUDO_USER:-${USER:-}}"
+  for candidate in "$HOME/.supabase/bin"; do
+    if [ -x "$candidate/supabase" ]; then
+      case ":$PATH:" in
+        *":$candidate:"*) ;;
+        *) PATH="$candidate:$PATH"; export PATH ;;
+      esac
+      return 0
+    fi
+  done
+
+  if [ -n "$target_user" ] && [ "$target_user" != "$(id -un)" ] && command -v getent >/dev/null 2>&1; then
+    home="$(getent passwd "$target_user" | awk -F: '{print $6}')"
+    if [ -n "$home" ] && [ -x "$home/.supabase/bin/supabase" ]; then
+      candidate="$home/.supabase/bin"
+      case ":$PATH:" in
+        *":$candidate:"*) ;;
+        *) PATH="$candidate:$PATH"; export PATH ;;
+      esac
+    fi
+  fi
+}
+
   docker_cmd() {
     if command docker info >/dev/null 2>&1; then
       command docker "$@"
@@ -221,6 +250,8 @@ install_docker_linux() {
 ensure_prerequisites() {
   local missing=() installable=() manual=() pkg_mgr="" need_docker=0
   local cmd
+
+  ensure_supabase_cli_on_path
 
   for cmd in git curl jq openssl docker psql supabase; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -943,6 +974,9 @@ portainer_ensure_private_registry() {
   [ -n "$registry_user" ] || die 'Docker Hub username is required for private Daiana images'
   [ -n "$registry_pat" ] || die 'Docker Hub PAT is required for private Daiana images'
 
+  DAIANA_REGISTRY_USERNAME="$registry_user"
+  DAIANA_REGISTRY_PAT="$registry_pat"
+
   local body
   body="$(jq -n \
     --arg name "$registry_name" \
@@ -952,6 +986,22 @@ portainer_ensure_private_registry() {
   registry_id="$(portainer_request_json POST /api/registries "$body" | jq -r '.Id // .id // empty')"
   [ -n "$registry_id" ] || die 'Could not create Portainer registry for private Daiana images'
   printf '[%s]' "$registry_id"
+}
+
+docker_login_private_registry() {
+  local registry_user="${DAIANA_REGISTRY_USERNAME:-}"
+  local registry_pat="${DAIANA_REGISTRY_PAT:-}"
+  [ -n "$registry_user" ] || return 0
+  [ -n "$registry_pat" ] || return 0
+
+  log "Authenticating local Docker client to Docker Hub for private Daiana images"
+  printf '%s' "$registry_pat" | docker_cmd login registry-1.docker.io --username "$registry_user" --password-stdin >/dev/null
+}
+
+prepull_daiana_images() {
+  log "Pre-pulling private Daiana images"
+  docker_login_private_registry
+  "${COMPOSE_CMD[@]}" -f "${APP_COMPOSE_FILES[0]}" -f "${APP_COMPOSE_FILES[1]}" pull
 }
 
 portainer_endpoint_id() {
@@ -1307,6 +1357,9 @@ ensure_flowise_storage_permissions
 
 log "Preparing private registry access for Daiana images"
 PORTAINER_DAIA_REGISTRIES_JSON="$(portainer_ensure_private_registry)"
+
+CURRENT_PHASE="pre-pulling Daiana images"
+prepull_daiana_images || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
 
 log "Deploying Daiana app stack via Portainer"
 portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_COMPOSE_FILES[@]}"

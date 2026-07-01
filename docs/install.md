@@ -9,6 +9,7 @@ What it does:
 - creates or restores `.env`
 - seeds Supabase keys when needed
 - prompts for Docker Hub credentials when the Daiana images need private registry access
+- logs the local Docker client into Docker Hub and pre-pulls private Daiana images before Portainer deploy
 - asks for core credentials in logical groups
 - persists prompted values immediately
 - deploys Portainer and app stacks
