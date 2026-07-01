@@ -179,8 +179,7 @@ ensure_docker_group_access() {
         fi
     }
 
-    if id -nG "$target_user" 2>/dev/null | tr ' ' '
-' | grep -qx docker; then
+    if id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
         return 0
     fi
 
@@ -193,6 +192,23 @@ ensure_docker_group_access() {
     log "Added $target_user to the docker group. Run 'newgrp docker' in this terminal now, or log out and back in, for direct docker access without sudo."
 }
 
+warn_docker_group_refresh() {
+    local current_user target_user
+    current_user="$(id -un)"
+    target_user="${SUDO_USER:-$(id -un)}"
+
+    [ -n "$target_user" ] || return 0
+    [ "$current_user" = "$target_user" ] || return 0
+
+    if id -nG | tr ' ' '\n' | grep -qx docker; then
+        return 0
+    fi
+
+    if id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+        log "This shell has not refreshed docker group membership yet. Run 'newgrp docker' now, or log out and back in, for direct docker access without sudo."
+    fi
+}
+
 docker_present() {
     command -v docker >/dev/null 2>&1 && docker_cmd compose version >/dev/null 2>&1
 }
@@ -201,6 +217,7 @@ install_docker() {
     if docker_present; then
         log "Docker already installed: $(docker --version)"
         ensure_docker_group_access
+        warn_docker_group_refresh
         return 0
     fi
 
@@ -241,6 +258,7 @@ install_docker() {
     $SUDO systemctl enable --now docker || warn "Could not enable docker via systemctl; start it manually."
 
     ensure_docker_group_access
+    warn_docker_group_refresh
     docker_present || die "Docker installation finished but 'docker compose' is still unavailable."
 }
 

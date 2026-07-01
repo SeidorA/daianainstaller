@@ -140,6 +140,23 @@ ensure_supabase_cli_on_path() {
     log "Added $target_user to the docker group. Run 'newgrp docker' in this terminal now, or log out and back in, for direct docker access without sudo."
   }
 
+      warn_docker_group_refresh() {
+        local current_user target_user
+        current_user="$(id -un)"
+        target_user="${SUDO_USER:-${USER:-}}"
+
+        [ -n "$target_user" ] || return 0
+        [ "$current_user" = "$target_user" ] || return 0
+
+        if id -nG | tr ' ' '\n' | grep -qx 'docker'; then
+          return 0
+        fi
+
+        if id -nG "$target_user" 2>/dev/null | tr ' ' '\n' | grep -qx 'docker'; then
+          log "This shell has not refreshed docker group membership yet. Run 'newgrp docker' now, or log out and back in, for direct docker access without sudo."
+        fi
+      }
+
 install_prereq_packages() {
   local pkg_mgr="$1"
   shift
@@ -197,6 +214,7 @@ install_docker_linux() {
     if docker_cmd compose version >/dev/null 2>&1; then
       log "Docker already installed: $(docker --version)"
       ensure_docker_group_access
+      warn_docker_group_refresh
       return 0
     fi
   fi
@@ -244,6 +262,7 @@ install_docker_linux() {
   fi
 
   ensure_docker_group_access
+  warn_docker_group_refresh
   docker_cmd compose version >/dev/null 2>&1 || die "Docker installation finished but 'docker compose' is still unavailable."
 }
 
