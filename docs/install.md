@@ -14,6 +14,7 @@ What it does:
 - deploys Portainer and app stacks
 - runs init SQL once after Supabase is healthy (auth, public, studio, webui)
 - creates NPM proxy hosts without TLS
+- `sh run.sh secrets` prints Supabase, NPM, and Portainer access credentials from `.env`
 
 ## Prompt order
 1. `BASE_DOMAIN`

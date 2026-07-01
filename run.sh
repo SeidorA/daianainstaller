@@ -256,24 +256,39 @@ case "$CMD" in
                 ;;
         esac
         ;;
-    secrets)
-        if [ ! -f .env ]; then
-            echo "ERROR: .env not found in $(pwd)" >&2
-            exit 1
-        fi
-        for var in POSTGRES_PASSWORD DASHBOARD_PASSWORD \
-                   SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY \
-                   S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET; do
-            line=$(grep "^${var}=" .env | head -n1)
-            if [ -n "$line" ]; then
-                echo "$line"
-            else
-                echo "${var}="
+        secrets)
+            if [ ! -f .env ]; then
+                echo "ERROR: .env not found in $(pwd)" >&2
+                exit 1
             fi
-        done
-        echo ""
-        ;;
-    help|-h|--help)
+
+            print_secret_group() {
+                local title="$1"
+                shift
+                echo "[$title]"
+                for var in "$@"; do
+                    line=$(grep "^${var}=" .env | head -n1)
+                    if [ -n "$line" ]; then
+                        echo "$line"
+                    else
+                        echo "${var}="
+                    fi
+                done
+                echo ""
+            }
+
+            print_secret_group "Supabase" \
+                POSTGRES_PASSWORD DASHBOARD_PASSWORD \
+                SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY \
+                S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
+
+            print_secret_group "Nginx Proxy Manager" \
+                NPM_ADMIN_EMAIL NPM_ADMIN_PASS
+
+            print_secret_group "Portainer" \
+                PORTAINER_ADMIN_USER PORTAINER_ADMIN_PASS
+            ;;
+        help|-h|--help)
         cat <<EOF
 Usage: $(basename "$0") <command>
 
