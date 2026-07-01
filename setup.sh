@@ -190,7 +190,7 @@ ensure_docker_group_access() {
         usermod -aG docker "$target_user" >/dev/null 2>&1 || true
     fi
 
-    log "Added $target_user to the docker group. Log out and back in for direct docker access without sudo."
+    log "Added $target_user to the docker group. Run 'newgrp docker' in this terminal now, or log out and back in, for direct docker access without sudo."
 }
 
 docker_present() {

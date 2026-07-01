@@ -108,7 +108,7 @@ install_supabase_cli() {
       usermod -aG "$group_name" "$target_user" || return 0
     fi
 
-    log "Added $target_user to the docker group. Log out and back in for direct docker access without sudo."
+    log "Added $target_user to the docker group. Run 'newgrp docker' in this terminal now, or log out and back in, for direct docker access without sudo."
   }
 
 install_prereq_packages() {
