@@ -78,50 +78,24 @@ INSERT INTO "public"."aibot" ("idBot", "idTenant", "name", "description", "creat
 
 
 --
--- Data for Name: login_sessions; Type: TABLE DATA; Schema: public; Owner: supabase_admin
--- Data for Name: teamsecurityuser; Type: TABLE DATA; Schema: public; Owner: supabase_admin
---
-
-INSERT INTO "public"."teamsecurityuser" ("id", "created_at", "team", "user", "tenant", "role", "member") VALUES
-	('e6c2fd94-38f7-4682-b422-1d634b473087', '2026-06-26 01:23:46.277767+00', '96d2e992-c4c8-491a-a4bd-e9a687185dec', 'c5c27317-4fb8-4e0c-be6b-ae9fd6808913', 1, 'admin', true);
-
-
---
--- Data for Name: tenant_license_activation_attempts; Type: TABLE DATA; Schema: public; Owner: supabase_admin
+-- Data for Name: login_sessions; Type: TABLE DATA; Schema: public; Owner: studio
 --
 
 
 
 --
--- Data for Name: tenant_license_activations; Type: TABLE DATA; Schema: public; Owner: supabase_admin
+-- Data for Name: roles; Type: TABLE DATA; Schema: public; Owner: postgres
 --
-
-
-
---
--- Data for Name: tenant_plans; Type: TABLE DATA; Schema: public; Owner: supabase_admin
---
-
-
-
---
--- Data for Name: training; Type: TABLE DATA; Schema: public; Owner: supabase_admin
---
-
-
-
---
--- Name: aibot_idBot_seq; Type: SEQUENCE SET; Schema: public; Owner: supabase_admin
---
-
-SELECT pg_catalog.setval('"public"."aibot_idBot_seq"', 1, true);
-
-TRUNCATE TABLE "public"."role_permissions", "public"."roles" RESTART IDENTITY;
 
 INSERT INTO "public"."roles" ("id", "tenantid", "name", "description", "created_at", "updated_at") VALUES
 	('c5869db2-6538-4a3c-8923-abf359176fb6', 1, 'admin', NULL, '2025-07-09 15:05:16.789+00', NULL),
 	('1f6420e0-fe91-4a45-9d79-9792189549d9', 1, 'creator', NULL, '2025-07-09 15:05:16.789+00', NULL),
 	('91d7813d-be3b-439d-874c-47721c8b9442', 1, 'user', NULL, '2025-07-09 15:05:16.789+00', NULL);
+
+
+--
+-- Data for Name: role_permissions; Type: TABLE DATA; Schema: public; Owner: postgres
+--
 
 INSERT INTO "public"."role_permissions" ("id", "role_id", "permission", "created_at", "updated_at") VALUES
 	('0669a5d3-9c0a-4e60-9dfe-ea48f0702b94', 'c5869db2-6538-4a3c-8923-abf359176fb6', 'create:dashboard', '2025-07-09 15:06:30.154+00', NULL),
@@ -188,6 +162,66 @@ INSERT INTO "public"."role_permissions" ("id", "role_id", "permission", "created
 	('df1cec18-8d0a-4e36-afa3-5e261f96aafd', '91d7813d-be3b-439d-874c-47721c8b9442', 'delete:profile', '2025-07-09 15:06:30.154+00', NULL),
 	('d100fed8-da2e-4bf8-b511-28f9e0fe6007', '91d7813d-be3b-439d-874c-47721c8b9442', 'read:help', '2025-07-09 15:06:30.154+00', NULL);
 
+
+--
+-- Data for Name: teamsecurityuser; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."teamsecurityuser" ("id", "created_at", "team", "user", "tenant", "role", "member") VALUES
+	('e6c2fd94-38f7-4682-b422-1d634b473087', '2026-06-26 01:23:46.277767+00', '96d2e992-c4c8-491a-a4bd-e9a687185dec', 'c5c27317-4fb8-4e0c-be6b-ae9fd6808913', 1, 'admin', true);
+
+
+--
+-- Data for Name: tenant_license_activation_attempts; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."tenant_license_activation_attempts" ("id", "idTenant", "rawPayload", "licenseBundle", "activationRequest", "activationResponse", "httpStatus", "errorCode", "errorMessage", "status", "uploadedFilename", "createdAt", "updatedAt") VALUES
+	(1, 1, '{
+  "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw",
+  "kid": "daiana-304bc02e86df",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEARE1/NOO0ek4370ZVCwpQaT5E5OvlPNi114p43OWb/Ic=\n-----END PUBLIC KEY-----\n",
+  "product_code": "daiana",
+  "customer_id": "interno",
+  "issuer": "keyforge",
+  "expires_at": "2027-05-10T00:00:00Z"
+}', '{"kid": "daiana-304bc02e86df", "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw", "issuer": "keyforge", "expires_at": "2027-05-10T00:00:00Z", "customer_id": "interno", "product_code": "daiana", "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEARE1/NOO0ek4370ZVCwpQaT5E5OvlPNi114p43OWb/Ic=\n-----END PUBLIC KEY-----\n", "expected_issuer": null, "expected_customer_id": null, "expected_product_code": null}', '{"token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw", "expected_issuer": "keyforge", "expected_customer_id": "interno", "expected_product_code": "daiana"}', '{"jti": "8e429eb3-9cc7-4512-8a42-5d0868560f00", "kid": "daiana-304bc02e86df", "mode": "ONLINE_SYNCED", "params": {"maxMessages": 10000, "studioIntegrated": true}, "source": "keyforge", "warning": null, "plan_name": "studio", "expires_at": "2027-05-10T00:00:00Z", "total_days": 364, "customer_id": "interno", "product_code": "daiana", "validated_at": "2026-07-01T18:17:56.434953Z"}', NULL, NULL, NULL, 'success', 'PRD-DAIANA_KEY.json', '2026-07-01 18:17:53.09599+00', '2026-07-01 18:17:53.096045+00');
+
+
+--
+-- Data for Name: tenant_license_activations; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."tenant_license_activations" ("id", "idTenant", "rawPayload", "licenseBundle", "activationRequest", "activationResponse", "mode", "productCode", "customerId", "planName", "jti", "kid", "totalDays", "expiresAt", "validatedAt", "source", "warning", "status", "uploadedFilename", "createdAt", "updatedAt") VALUES
+	(1, 1, '{
+  "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw",
+  "kid": "daiana-304bc02e86df",
+  "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEARE1/NOO0ek4370ZVCwpQaT5E5OvlPNi114p43OWb/Ic=\n-----END PUBLIC KEY-----\n",
+  "product_code": "daiana",
+  "customer_id": "interno",
+  "issuer": "keyforge",
+  "expires_at": "2027-05-10T00:00:00Z"
+}', '{"kid": "daiana-304bc02e86df", "token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw", "issuer": "keyforge", "expires_at": "2027-05-10T00:00:00Z", "customer_id": "interno", "product_code": "daiana", "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEARE1/NOO0ek4370ZVCwpQaT5E5OvlPNi114p43OWb/Ic=\n-----END PUBLIC KEY-----\n", "expected_issuer": null, "expected_customer_id": null, "expected_product_code": null}', '{"token": "eyJhbGciOiJFZERTQSIsImtpZCI6ImRhaWFuYS0zMDRiYzAyZTg2ZGYiLCJ0eXAiOiJKV1QifQ.eyJ2ZXIiOiIxIiwiaXNzIjoia2V5Zm9yZ2UiLCJhdWQiOiJkYWlhbmEiLCJpYXQiOjE3Nzg1MTc4ODIsIm5iZiI6MTc3ODQ1NzYwMCwiZXhwIjoxODA5OTA3MjAwLCJqdGkiOiI4ZTQyOWViMy05Y2M3LTQ1MTItOGE0Mi01ZDA4Njg1NjBmMDAiLCJwcm9kdWN0X2NvZGUiOiJkYWlhbmEiLCJjdXN0b21lcl9pZCI6ImludGVybm8iLCJwYXJhbXMiOnsibWF4TWVzc2FnZXMiOjEwMDAwLCJzdHVkaW9JbnRlZ3JhdGVkIjp0cnVlfSwic2NoZW1hX3ZlcnNpb24iOiJ2MSIsInBsYW5fY29kZSI6IjQ3ODUwODEyIiwicGxhbl92ZXJzaW9uIjoidjEifQ.Cqq_v4MPwgokir0PmgfP5VsQjIxwJj_WE2Hh61IebNPJVexpcDblMTH-jjiTY-Be_bW8iVhj3m3kMTJxErHxDw", "expected_issuer": "keyforge", "expected_customer_id": "interno", "expected_product_code": "daiana"}', '{"jti": "8e429eb3-9cc7-4512-8a42-5d0868560f00", "kid": "daiana-304bc02e86df", "mode": "ONLINE_SYNCED", "params": {"maxMessages": 10000, "studioIntegrated": true}, "source": "keyforge", "warning": null, "plan_name": "studio", "expires_at": "2027-05-10T00:00:00Z", "total_days": 364, "customer_id": "interno", "product_code": "daiana", "validated_at": "2026-07-01T18:17:56.434953Z"}', 'ONLINE_SYNCED', 'daiana', 'interno', 'studio', '8e429eb3-9cc7-4512-8a42-5d0868560f00', 'daiana-304bc02e86df', 364, '2027-05-10 00:00:00+00', '2026-07-01 18:17:56.434953+00', 'keyforge', NULL, 'success', 'PRD-DAIANA_KEY.json', '2026-07-01 18:17:53.09599+00', '2026-07-01 18:17:53.096045+00');
+
+
+--
+-- Data for Name: tenant_plans; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+INSERT INTO "public"."tenant_plans" ("id", "idTenant", "planName", "maxMessages", "studioIntegrated", "periodStartAt", "expiresAt", "validatedAt", "status", "createdAt", "updatedAt") VALUES
+	(1, 1, 'studio', 10000, true, '2026-07-01 18:17:56.434953+00', '2027-05-10 00:00:00+00', '2026-07-01 18:17:56.434953+00', 'active', '2026-07-01 18:17:56.682909+00', '2026-07-01 18:17:56.489445+00');
+
+
+--
+-- Data for Name: training; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+
+
+--
+-- Name: aibot_idBot_seq; Type: SEQUENCE SET; Schema: public; Owner: supabase_admin
+--
+
+SELECT pg_catalog.setval('"public"."aibot_idBot_seq"', 1, true);
 
 
 --

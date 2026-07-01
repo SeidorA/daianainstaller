@@ -451,6 +451,9 @@ seed_daiana_env() {
   log "Checking Daiana-specific values"
   local changed=0
   local public_scheme="https"
+  case "${BASE_DOMAIN:-}" in
+    *.nip.io) public_scheme="http" ;;
+  esac
   log "Public URL scheme for BASE_DOMAIN is $public_scheme"
   ensure_default() {
     local var="$1"
@@ -528,7 +531,6 @@ seed_daiana_env() {
   ensure_default GOOGLE_EMBEDDING_MODEL ""
   ensure_default GOOGLE_UNIVERSE_DOMAIN "googleapis.com"
   ensure_default GOOGLE_SECRET ""
-  ensure_default NEXT_PUBLIC_API_PYTHON "$BACKEND_BASE_URL"
   ensure_secret FLOWISE_SECRETKEY_OVERWRITE 64
   ensure_secret EXPRESS_SESSION_SECRET 64
   ensure_secret JWT_AUTH_TOKEN_SECRET 64
@@ -862,23 +864,34 @@ ensure_flowise_storage_permissions() {
     :
   else
     log "Cannot create $flowise_dir"
-    if prompt_yes_no "Fix Flowise permissions with sudo chown -R 1000:1000 $flowise_root now?" "y"; then
-      if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
-        sudo chown -R 1000:1000 "$flowise_root"
+    if [ "$ACTION" = "install" ]; then
+      if prompt_yes_no "Fix Flowise permissions with sudo chown -R 1000:1000 $flowise_root now?" "y"; then
+        if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+          sudo chown -R 1000:1000 "$flowise_root"
+        else
+          chown -R 1000:1000 "$flowise_root"
+        fi
+        mkdir -p "$flowise_dir" || die "Could not create $flowise_dir even after fixing permissions"
       else
-        chown -R 1000:1000 "$flowise_root"
+        die "Cannot continue until $flowise_dir is writable"
       fi
-      mkdir -p "$flowise_dir" || die "Could not create $flowise_dir even after fixing permissions"
     else
-      die "Cannot continue until $flowise_dir is writable"
+      if [ "$(id -u)" -eq 0 ]; then
+        chown -R 1000:1000 "$flowise_root"
+      elif command -v sudo >/dev/null 2>&1; then
+        sudo chown -R 1000:1000 "$flowise_root"
+      fi
+      mkdir -p "$flowise_dir" || die "Could not create $flowise_dir; fix permissions and retry"
     fi
   fi
-  if [ "$(id -u)" -eq 0 ]; then
-    chown -R 1000:1000 "$flowise_root"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo chown -R 1000:1000 "$flowise_root"
-  else
-    log "Skipping ownership change for $flowise_root (no sudo available)"
+  if [ "$ACTION" = "install" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+      chown -R 1000:1000 "$flowise_root"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo chown -R 1000:1000 "$flowise_root"
+    else
+      log "Skipping ownership change for $flowise_root (no sudo available)"
+    fi
   fi
 }
 

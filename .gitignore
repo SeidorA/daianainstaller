@@ -12,5 +12,6 @@ volumes/db/data/
 volumes/storage/stub/
 volumes/daiana/
 volumes/portainer/
-volumes/api/server.*
+volumes/api/*.crt
+volumes/api/*.key
 volumes/snippets/*.sql

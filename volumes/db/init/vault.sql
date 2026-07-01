@@ -23,6 +23,8 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION "public"."vault_access"("secret_id" "uuid") OWNER TO postgres;
+
 CREATE OR REPLACE FUNCTION "public"."vault_upsert_secret"(
     secret_value text,
     secret_name text,
@@ -53,13 +55,14 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION "public"."vault_upsert_secret"("secret_value" "text", "secret_name" "text", "secret_description" "text") OWNER TO postgres;
+
 SELECT public.vault_upsert_secret(:'supabase_public_url', 'NEXT_PUBLIC_SUPABASE_URL', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_python', 'NEXT_PUBLIC_API_PYTHON', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_training', 'NEXT_PUBLIC_API_TRAINING', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_qdrant', 'NEXT_PUBLIC_API_QDRANT', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_msteams', 'NEXT_PUBLIC_API_MSTEAMS', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_whatsapp', 'NEXT_PUBLIC_API_WHATSAPP', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_api_studio_base_url', 'NEXT_PUBLIC_API_STUDIO_BASE_URL', 'This is the description');
-SELECT public.vault_upsert_secret(:'next_public_webui_url', 'NEXT_PUBLIC_WEBUI_URL', 'This is the description');
+SELECT public.vault_upsert_secret(:'backend_base_url', 'NEXT_PUBLIC_API_PYTHON', 'This is the description');
+SELECT public.vault_upsert_secret(:'vanna_base_url', 'NEXT_PUBLIC_API_TRAINING', 'This is the description');
+SELECT public.vault_upsert_secret(:'qdrant_base_url', 'NEXT_PUBLIC_API_QDRANT', 'This is the description');
+SELECT public.vault_upsert_secret(:'ms_base_url', 'NEXT_PUBLIC_API_MSTEAMS', 'This is the description');
+SELECT public.vault_upsert_secret(:'ws_base_url', 'NEXT_PUBLIC_API_WHATSAPP', 'This is the description');
+SELECT public.vault_upsert_secret(:'studio_base_url', 'NEXT_PUBLIC_API_STUDIO_BASE_URL', 'This is the description');
+SELECT public.vault_upsert_secret(:'webui_base_url', 'NEXT_PUBLIC_WEBUI_URL', 'This is the description');
 SELECT public.vault_upsert_secret(:'next_public_app_url', 'NEXT_PUBLIC_APP_URL', 'This is the description');
-SELECT public.vault_upsert_secret(:'cors_allow_origin', 'CORS_ALLOW_ORIGIN', 'This is the description');
