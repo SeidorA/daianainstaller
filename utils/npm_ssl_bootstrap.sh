@@ -138,17 +138,11 @@ create_letsencrypt_certificate() {
   # NPM crea 1 cert por set de dominios; aquí hacemos 1 dominio por cert (simple)
   local payload
   payload="$(jq -n \
-    --arg email "$LETSENCRYPT_EMAIL" \
     --arg d "$domain" \
     '{
       provider: "letsencrypt",
       nice_name: $d,
-      domain_names: [$d],
-      meta: {
-        letsencrypt_email: $email,
-        letsencrypt_agree: true,
-        dns_challenge: false
-      }
+      domain_names: [$d]
     }')"
 
   echo "Creando certificado Let's Encrypt para: $domain" >&2
@@ -296,7 +290,7 @@ ensure_certificate() {
     return 0
   fi
 
-  cert_id="$(create_letsencrypt_certificate "$domain" 2>/dev/null || true)"
+  cert_id="$(create_letsencrypt_certificate "$domain" || true)"
   if [[ -n "$cert_id" && "$cert_id" != "null" ]]; then
     echo "Cert Let's Encrypt creado para $domain (id=$cert_id)" >&2
     echo "$cert_id"
@@ -525,6 +519,7 @@ main() {
   SERVICES+=("msteams:daiana-msteams:3978")
 
   matched=0
+  tls_certificate_failures=0
   for entry in "${SERVICES[@]}"; do
     IFS=":" read -r prefix default_host default_port <<<"$entry"
     if [[ -n "$ONLY_PREFIX" && "$prefix" != "$ONLY_PREFIX" ]]; then
@@ -556,6 +551,9 @@ main() {
         ;;
       letsencrypt)
         cert_id="$(ensure_certificate "$domain")"
+        if [[ -z "$cert_id" || "$cert_id" == "null" ]]; then
+          tls_certificate_failures=$((tls_certificate_failures + 1))
+        fi
         ;;
       local|custom)
         cert_id="$CUSTOM_CERT_ID"
@@ -581,7 +579,13 @@ main() {
       fi
       ;;
     *)
-      if [[ -n "$ONLY_PREFIX" ]]; then
+      if [[ "$tls_certificate_failures" -gt 0 ]]; then
+        if [[ -n "$ONLY_PREFIX" ]]; then
+          echo "Listo: proxy host $ONLY_PREFIX actualizado sin certificado TLS; revisá los errores anteriores."
+        else
+          echo "Listo: proxy hosts actualizados, pero $tls_certificate_failures certificado(s) Let's Encrypt no se pudieron crear."
+        fi
+      elif [[ -n "$ONLY_PREFIX" ]]; then
         echo "Listo: proxy host $ONLY_PREFIX actualizado con certificado."
       else
         echo "Listo: proxy hosts actualizados con certificados."
