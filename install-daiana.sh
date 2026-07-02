@@ -709,6 +709,7 @@ seed_daiana_env() {
   ensure_secret JWT_AUTH_TOKEN_SECRET 64
   ensure_secret JWT_REFRESH_TOKEN_SECRET 64
   ensure_secret WEBUI_SECRET_KEY 64
+  ensure_secret WEBUI_AUTH_HANDOFF_SECRET 64
   ensure_secret WHATSAPP_SECRET_KEY 64
   ensure_secret BOT_SECRET_KEY 64
   ensure_secret AUTH_KEY 64
