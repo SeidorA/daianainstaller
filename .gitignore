@@ -3,7 +3,8 @@
 .pi/
 
 # Local environment / OS noise
-.env
+.env*
+!.env.example
 .DS_Store
 *.old
 
