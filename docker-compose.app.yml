@@ -1,6 +1,6 @@
 services:
   daiananext:
-    image: cloudseidoranalytics/daiana:v2.1.7
+    image: cloudseidoranalytics/daiana:v2.1.8
     container_name: daiana-next
     restart: unless-stopped
     volumes:
@@ -17,7 +17,7 @@ services:
         condition: service_healthy
 
   daianapython:
-    image: cloudseidoranalytics/daianapython:v2.1.5
+    image: cloudseidoranalytics/daianapython:v2.1.8
     container_name: daiana-python
     restart: unless-stopped
     working_dir: /app
@@ -68,11 +68,11 @@ services:
       start_period: 30s
 
   daianavanna:
-    image: cloudseidoranalytics/daianavanna:v1.30.4
+    image: cloudseidoranalytics/daianavanna:v2.1.8
     container_name: daiana-vanna
     restart: unless-stopped
     working_dir: /app
-    command: python app.py
+    # command: python app.py
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       FLASK_ENV: production
@@ -84,7 +84,7 @@ services:
         condition: service_healthy
 
   daianaqdrant:
-    image: qdrant/qdrant:v1.15.5
+    image: qdrant/qdrant:v1.18.2
     container_name: daiana-qdrant
     restart: unless-stopped
     volumes:
@@ -97,37 +97,36 @@ services:
         condition: service_healthy
 
   daianamsteams:
-    image: cloudseidoranalytics/daianamsteams:v2.1.5
+    image: cloudseidoranalytics/daianamsteams:v2.1.8
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
       DAIANA_URL: ${BACKEND_BASE_URL}
-    command: /bin/sh -c "gunicorn --bind 0.0.0.0:3978 --worker-class aiohttp.worker.GunicornWebWorker --timeout 600 app:app"
+    # command: /bin/sh -c "gunicorn --bind 0.0.0.0:3978 --worker-class aiohttp.worker.GunicornWebWorker --timeout 600 app:app"
     tty: true
     depends_on:
       daianapython:
         condition: service_healthy
 
   daianawhatsapp:
-    container_name: daiana-whatsapp
-    image: cloudseidoranalytics/daianawhatsapp:v1.0.2
-    restart: unless-stopped
-    environment:
-      FLASK_ENV: production
+     container_name: daiana-whatsapp
+     image: cloudseidoranalytics/daianawhatsapp:v2.1.8
+     restart: unless-stopped
+     environment:
       PYTHONUNBUFFERED: 1
+      APP_ENV: production
       SECRET_KEY: ${WHATSAPP_SECRET_KEY}
       HOST: 0.0.0.0
       PORT: 3008
-      BACK_URL: ${BACKEND_BASE_URL}
-      HOME_URL: ${SUPABASE_PUBLIC_URL}
+      BACKEND_API_URL: ${BACKEND_BASE_URL}
+      APP_BASE_URL: ${SUPABASE_PUBLIC_URL}
       BOT_SECRET_KEY: ${BOT_SECRET_KEY}
-    volumes:
-      - ./volumes/daiana/whatsapp/log:/app/src/utils/log
-    command: /bin/sh -c "gunicorn --bind 0.0.0.0:3008 --timeout 600 app:app"
-    tty: true
-    depends_on:
-      daianapython:
-        condition: service_healthy
+     volumes:
+       - ./volumes/daiana/whatsapp/log:/app/src/utils/log
+     tty: true
+     depends_on:
+       daianapython:
+         condition: service_healthy
 
   daianastudio:
     image: cloudseidoranalytics/daianastudio:v3.1.2
@@ -180,7 +179,7 @@ services:
           - node.role == manager
 
   daianawebui:
-    image: cloudseidoranalytics/daianawebui:v2.1.7
+    image: cloudseidoranalytics/daianawebui:v0.6.30
     container_name: daiana-webui
     volumes:
       - ./volumes/daiana/webui/data:/app/backend/data
