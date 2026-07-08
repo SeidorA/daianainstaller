@@ -1,39 +1,127 @@
 <div align="center">
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/supabase/supabase/3-self-hosted-deployment)
 
 </div>
 
-# Self-Hosted Supabase with Docker
+# Daiana Installer
 
-This is the official Docker Compose setup for self-hosted Supabase. It provides a complete stack with all Supabase services running locally or on your infrastructure.
+Installer and lifecycle tooling for deploying Daiana on top of a self-hosted Supabase stack using Docker, Portainer, and Nginx Proxy Manager.
 
-In this repository, `main` is the baseline commit (`Inicial commit`) and `dev` is the working branch for upcoming changes.
+This repository is not only a Supabase compose bundle. It contains the operational scripts, compose overlays, documentation, and version metadata used to install, update, roll back, certificate-enable, and uninstall a Daiana deployment.
 
-## Getting Started
+## Quick path
 
-Follow the detailed setup guide in our documentation: [Self-Hosting with Docker](https://supabase.com/docs/guides/self-hosting/docker)
+```bash
+bash install-daiana.sh
+```
 
-The guide covers:
-- Prerequisites (Git and Docker)
-- Initial setup and configuration
-- Securing your installation
-- Accessing services
-- Updating your instance
+After the initial install, the main lifecycle commands are:
 
-## Local Workflow
+| Action | Command | Notes |
+|---|---|---|
+| Install | `bash install-daiana.sh` | Bootstraps Portainer, NPM, Supabase, and Daiana stacks |
+| Apply certificates | `bash apply-certs.sh` | Applies TLS to existing NPM proxy hosts; it does not create missing proxy hosts |
+| Update | `bash update-daiana.sh` | Updates stacks in place and can prompt for target image versions |
+| Rollback update | `bash update-daiana.sh --rollback` | Restores the latest Daiana app stack image/compose snapshot |
+| List rollback snapshots | `bash update-daiana.sh --rollback --list` | Shows available update snapshots |
+| Uninstall | `bash uninstall-daiana.sh` | Stops and removes managed runtime resources |
+| Full cleanup | `bash uninstall-daiana.sh --purge` | Removes runtime data as well |
 
-### Prerequisites
+See [docs/README.md](docs/README.md) for the full lifecycle guide.
+
+## What this repo manages
+
+| Area | Purpose |
+|---|---|
+| Daiana app stack | Daiana frontend/backend services, Vanna, Teams, WhatsApp, WebUI, Qdrant, and storage mounts |
+| Supabase base stack | Auth, Kong, PostgREST, Realtime, Storage, Studio, Postgres, and supporting services |
+| Portainer | Stack deployment and Docker Hub private registry credentials |
+| Nginx Proxy Manager | Public DNS/proxy host creation and certificate workflow |
+| Updates | Selectable Daiana image versions, optional independently versioned images, and rollback snapshots |
+| Versioning | `VERSION`, `CHANGELOG.md`, `versions.md`, and Git tags |
+
+Each Portainer stack receives only the environment variables referenced by its compose file(s).
+
+## Requirements
+
+The installer checks prerequisites and, where possible, offers to install missing packages automatically.
+
+Required tools:
+
 - `bash`
 - `git`
 - `docker`
 - Docker Compose (`docker compose` or `docker-compose`)
-- `curl`, `jq`, `openssl`, `psql`, `supabase`
+- `curl`
+- `jq`
+- `openssl`
+- `psql`
+- `supabase`
 
-The installer checks these first and, when possible, offers to install missing `docker` (Linux), `curl`, `jq`, `openssl`, `psql`, `supabase`, and Compose packages automatically. If the Daiana images are private, it will also prompt for Docker Hub credentials (username + PAT) so Portainer can pull them.
+For private Daiana images, provide Docker Hub credentials when prompted or set:
 
-The repo includes a Makefile for the common Supabase + Daiana flow:
+```bash
+DAIANA_REGISTRY_USERNAME=<dockerhub-user> \
+DAIANA_REGISTRY_PAT=<dockerhub-pat> \
+bash install-daiana.sh
+```
+
+The default Portainer registry name is `dockerhub-prod-sdr` with URL `docker.io`.
+
+## Update and rollback behavior
+
+`update-daiana.sh` validates repository sync when git upstream metadata is available. If the repo is behind, it asks before running `git pull --ff-only`; if history diverged, it stops.
+
+During update, the installer can prompt for:
+
+- one target version for the main Daiana image family;
+- optional independent versions for WebUI, Studio, and Qdrant.
+
+It saves rollback snapshots under:
+
+```text
+volumes/daiana/update-history/<timestamp>/
+```
+
+Rollback restores **compose/images only**. It does not roll back databases, migrations, Qdrant data, WebUI data, or other persisted volumes.
+
+For details, see [docs/update.md](docs/update.md).
+
+## Documentation
+
+| Document | Use |
+|---|---|
+| [docs/install.md](docs/install.md) | Installation flow |
+| [docs/certs.md](docs/certs.md) | Certificate and proxy host workflow |
+| [docs/update.md](docs/update.md) | Updates, selectable versions, rollback, and repo sync guard |
+| [docs/uninstall.md](docs/uninstall.md) | Cleanup and purge behavior |
+| [docs/daiana-lifecycle.md](docs/daiana-lifecycle.md) | Lifecycle overview |
+| [CONFIG.md](CONFIG.md) | Supabase environment variable reference |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
+| [versions.md](versions.md) | Docker image version history |
+| [VERSION](VERSION) | Current installer version |
+
+## Base stack
+
+This installer uses the self-hosted Supabase Docker stack as its base. Relevant Supabase services include:
+
+- Studio
+- Kong
+- Auth
+- PostgREST
+- Realtime
+- Storage
+- PostgreSQL
+- Edge Runtime
+- Logflare / Vector
+- Supavisor
+
+For upstream Supabase concepts and service-specific configuration, use the official [Self-Hosting with Docker](https://supabase.com/docs/guides/self-hosting/docker) documentation.
+
+## Local development helpers
+
+The repo includes a Makefile for local compose workflows:
 
 - `make up` — start the stack
 - `make up WIPE=1` — start after cleaning runtime data
@@ -41,91 +129,22 @@ The repo includes a Makefile for the common Supabase + Daiana flow:
 - `make down WIPE=1` — stop and clean runtime data
 - `make bootstrap` — configure NPM SSL
 
-## Lifecycle
+If you want to inspect compose output directly, use:
 
-See the docs index for the current flow:
-- [docs/README.md](docs/README.md)
+```bash
+sh run.sh config
+```
 
-The main commands are:
-- `bash install-daiana.sh`
-- `bash apply-certs.sh`
-- `bash update-daiana.sh`
-- `bash ./uninstall-daiana.sh [--purge]`
+## Security notes
 
-Each Portainer stack receives only the environment variables referenced by its compose file(s).
+This installer can expose services publicly through Nginx Proxy Manager. Before production use:
 
-If you want to manage compose overrides directly, use `sh run.sh config`.
-
-## What's Included
-
-This Docker Compose configuration includes the following services:
-
-- **[Studio](https://github.com/supabase/supabase/tree/master/apps/studio)** - A dashboard for managing your self-hosted Supabase project
-- **[Kong](https://github.com/Kong/kong)** - Kong API gateway
-- **[Auth](https://github.com/supabase/auth)** - JWT-based authentication API for user sign-ups, logins, and session management
-- **[PostgREST](https://github.com/PostgREST/postgrest)** - Web server that turns your PostgreSQL database directly into a RESTful API
-- **[Realtime](https://github.com/supabase/realtime)** - Elixir server that listens to PostgreSQL database changes and broadcasts them over websockets
-- **[Storage](https://github.com/supabase/storage)** - RESTful API for managing files in S3, with Postgres handling permissions
-- **[imgproxy](https://github.com/imgproxy/imgproxy)** - Fast and secure image processing server
-- **[postgres-meta](https://github.com/supabase/postgres-meta)** - RESTful API for managing Postgres (fetch tables, add roles, run queries)
-- **[PostgreSQL](https://github.com/supabase/postgres)** - Object-relational database with over 30 years of active development
-- **[Edge Runtime](https://github.com/supabase/edge-runtime)** - Web server based on Deno runtime for running JavaScript, TypeScript, and WASM services
-- **[Logflare](https://github.com/Logflare/logflare)** - Log management and event analytics platform
-- **[Vector](https://github.com/vectordotdev/vector)** - High-performance observability data pipeline for logs
-- **[Supavisor](https://github.com/supabase/supavisor)** - Supabase's Postgres connection pooler
-
-## Documentation
-
-- **[Self-Hosting with Docker](https://supabase.com/docs/guides/self-hosting/docker)** - Setup and configuration guides
-- **[CHANGELOG.md](./CHANGELOG.md)** - Track recent updates and changes to services
-- **[versions.md](./versions.md)** - Complete history of Docker image versions for rollback reference
-- **[Ask DeepWiki / Supabase](https://deepwiki.com/supabase/supabase/3-self-hosted-deployment)** - DeepWiki-generated description of self-hosted configuration
-- **[CONFIG.md](./CONFIG.md)** - Configuration reference for all environment variables
-
-## Updates
-
-To update your self-hosted Supabase instance:
-
-1. Review [CHANGELOG.md](./CHANGELOG.md) for breaking changes
-2. Check [versions.md](./versions.md) for new image versions
-3. Update `docker-compose.yml` if there are configuration changes
-4. Pull the latest images: `docker compose pull`
-5. Stop services: `docker compose down`
-6. Start services with new configuration: `docker compose up -d`
-
-**Note:** Consider to always backup your database before updating.
-
-## Community & Support
-
-For troubleshooting common issues, see:
-- [GitHub Discussions](https://github.com/orgs/supabase/discussions?discussions_q=is%3Aopen+label%3Aself-hosted) - Questions, feature requests, and workarounds
-- [GitHub Issues](https://github.com/supabase/supabase/issues?q=is%3Aissue%20state%3Aopen%20label%3Aself-hosted) - Known issues
-- [Documentation](https://supabase.com/docs/guides/self-hosting) - Setup and configuration guides
-
-Self-hosted Supabase is community-supported. Get help and connect with other users:
-
-- [Discord](https://discord.supabase.com) - Real-time chat and community support
-- [Reddit](https://www.reddit.com/r/Supabase/) - Official Supabase subreddit
-
-Share your self-hosting experience:
-
-- [GitHub Discussions](https://github.com/orgs/supabase/discussions/39820) - "Self-hosting: What's working (and what's not)?"
-
-## Important Notes
-
-### Security
-
-⚠️ **The default configuration is not secure for production use.**
-
-Before deploying to production, you must:
-- [Update](https://supabase.com/docs/guides/self-hosting/docker#configuring-and-securing-supabase) all default passwords and secrets in the `.env` file
-- Review and update CORS settings
-- Consider setting up a secure proxy in front of self-hosted Supabase
-- Review and adjust network security configuration (ACLs, etc.)
-- Set up proper backup procedures
-
-See the [main installation guide](https://supabase.com/docs/guides/self-hosting/docker) and the how-tos in the documentation.
+- replace all default secrets and passwords in `.env`;
+- use Docker Hub PATs, not account passwords;
+- review public hostnames and CORS settings;
+- configure backups before updates;
+- understand rollback scope: image rollback is not data rollback.
 
 ## License
 
-This repository is licensed under the Apache 2.0 License. See the main [Supabase repository](https://github.com/supabase/supabase) for details.
+This repository is licensed under Apache 2.0. It includes and adapts self-hosted Supabase Docker configuration; see the upstream [Supabase repository](https://github.com/supabase/supabase) for the original project context.
