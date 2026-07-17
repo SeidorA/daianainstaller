@@ -15,7 +15,14 @@ During an interactive update, the installer:
 3. saves a rollback snapshot of the current Daiana app stack;
 4. asks for the target version for the main Daiana app images;
 5. optionally asks whether to update independently versioned images;
-6. renders a temporary compose override for Portainer without modifying the source compose files.
+6. waits for Supabase and applies pending Daiana database migrations;
+7. renders a temporary compose override and deploys app images only after migrations succeed.
+
+## Database migration safety
+
+Migrations under `volumes/db/daiana-migrations/` are forward-only. The installer serializes runners with a PostgreSQL advisory lock, verifies SHA-256 history in `private.daiana_installer_schema_migrations`, and applies migration SQL plus its history insert atomically. An exact applied version/checksum is skipped; checksum drift or SQL failure stops the update before app images deploy.
+
+Take a PostgreSQL backup before updating. The installer rollback command restores compose/images only and cannot reverse database migrations. PostgreSQL 15 and 17 are supported.
 
 ## Main Daiana app version
 

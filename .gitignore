@@ -1,6 +1,7 @@
 # Local Pi runtime state
 .atl/
 .pi/
+.codegraph/
 
 # Local environment / OS noise
 .env*

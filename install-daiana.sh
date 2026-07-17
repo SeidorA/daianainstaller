@@ -48,6 +48,9 @@ run() {
   "$@"
 }
 
+# shellcheck source=utils/daiana-migrations.sh
+source "$ROOT_DIR/utils/daiana-migrations.sh"
+
 prompt_yes_no() {
   local question="$1"
   local default_answer="${2:-y}"
@@ -1687,7 +1690,8 @@ Would:
 - authenticate Portainer to the private Daiana image registry when needed
 - wait for core Supabase to become healthy
 - wait for Supabase Auth migrations to finish
-- run init SQL in order: schemas, auth, public, studio, webui, vault, functions
+- wait for PostgreSQL entrypoint structural init, then run post-start seeds: auth, public, studio, webui, vault
+- verify/apply ordered Daiana database migrations before app deployment
 - create/update Portainer stack: $APP_STACK_NAME from ${APP_COMPOSE_FILES[*]}
 - wait for NPM at $NPM_URL/api
 - create proxy hosts without TLS:
@@ -1705,7 +1709,7 @@ Would:
 - validate current Daiana container image versions
 - create a rollback snapshot before a normal update
 - check for missing/new env vars
-- update or roll back Portainer stacks in place
+- wait for Supabase, verify/apply Daiana database migrations, then update app images
 - wait for NPM at $NPM_URL/api
 EOF
   exit 0
@@ -1780,15 +1784,19 @@ fi
 log "Deploying NPM stack via Portainer"
 portainer_upsert_stack "$NPM_STACK_NAME" "$NPM_STACK_ENV_JSON" "" docker-compose.npm.yml
 
-log "Deploying core Supabase stack via Portainer"
-portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "" "${SUPABASE_COMPOSE_FILES[@]}"
-
-CURRENT_PHASE="waiting for core Supabase"
-wait_for_supabase_ready 240 2 || die "Supabase core did not become ready"
-
 if [ "$ACTION" = "install" ]; then
+  log "Deploying core Supabase stack via Portainer"
+  portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "" "${SUPABASE_COMPOSE_FILES[@]}"
+  CURRENT_PHASE="waiting for core Supabase"
+  wait_for_supabase_ready 240 2 || die "Supabase core did not become ready"
   run_supabase_init_sql
+else
+  CURRENT_PHASE="waiting for currently deployed Supabase"
+  wait_for_supabase_ready 240 2 || die "Existing Supabase core did not become ready"
 fi
+
+CURRENT_PHASE="running Daiana database migrations"
+run_daiana_migrations
 
 log "Preparing app storage directories"
 ensure_app_storage_directories

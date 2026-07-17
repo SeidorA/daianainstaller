@@ -14,8 +14,10 @@ What it does:
 - logs the local Docker client into Docker Hub and pre-pulls private Daiana images before Portainer deploy
 - asks for core credentials in logical groups
 - persists prompted values immediately
-- deploys Portainer and app stacks
-- runs init SQL once after Supabase is healthy (auth, public, studio, webui)
+- deploys Portainer and the core Supabase stack
+- waits for PostgreSQL entrypoint structural init, then runs post-start seed SQL once after Supabase is healthy (auth, public, studio, webui, vault)
+- applies pending ordered Daiana migrations before deploying any app consumers
+- deploys the Daiana app stack only after migrations succeed
 - creates NPM proxy hosts without TLS
 - `sh run.sh secrets` prints Supabase, NPM, and Portainer access credentials from `.env`
 
@@ -32,3 +34,11 @@ What it does:
 - `NPM_ADMIN_EMAIL`: `admin@example.com`
 - `LICENSE_ACTIVATION_BASE_URL`: `https://license.example.com`
 - SMTP placeholders in `.env.example` are treated as empty on first run
+
+## Database migrations
+
+Installer-owned migrations live in `volumes/db/daiana-migrations/`; they are not mounted into PostgreSQL's entrypoint because Daiana schemas do not exist at that stage. Files run lexically under a global advisory lock and one transaction with `psql ON_ERROR_STOP`.
+
+History is stored in `private.daiana_installer_schema_migrations` with the version, name, SHA-256 checksum, application time, and installer version. Exact version/checksum matches are no-ops. A checksum mismatch or SQL failure stops installation before app deployment and leaves no migration history row.
+
+Use `bash install-daiana.sh --dry-run` to preview the lifecycle without contacting the database. PostgreSQL 15 and 17 are supported.

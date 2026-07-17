@@ -39,6 +39,7 @@ See [docs/README.md](docs/README.md) for the full lifecycle guide.
 | Portainer | Stack deployment and Docker Hub private registry credentials |
 | Nginx Proxy Manager | Public DNS/proxy host creation and certificate workflow |
 | Updates | Selectable Daiana image versions, optional independently versioned images, and rollback snapshots |
+| Database migrations | Forward-only ordered Daiana migrations with advisory locking and checksum history |
 | Versioning | `VERSION`, `CHANGELOG.md`, `versions.md`, and Git tags |
 
 Each Portainer stack receives only the environment variables referenced by its compose file(s).
@@ -85,6 +86,8 @@ volumes/daiana/update-history/<timestamp>/
 ```
 
 Rollback restores **compose/images only**. It does not roll back databases, migrations, Qdrant data, WebUI data, or other persisted volumes.
+
+Before either a fresh app deployment or updated app images start, the installer applies pending files from `volumes/db/daiana-migrations/`. Applied versions and SHA-256 checksums are recorded in `private.daiana_installer_schema_migrations`; a changed checksum fails the deployment. Back up PostgreSQL before updating because migrations are forward-only and image rollback does not reverse them. PostgreSQL 15 and 17 are supported.
 
 For details, see [docs/update.md](docs/update.md).
 
