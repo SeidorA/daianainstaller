@@ -80,11 +80,10 @@ Phase 1 accepts an explicitly selected JSON deployment bundle without changing a
 
 ```bash
 DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/daiana-bundle.json \
-DAIANA_BUNDLE_SCOPE=all \
 bash update-daiana.sh
 ```
 
-The version 1 contract contains `schema_version: 1`, the exact rollout order `daianapython`, `daiananext`, `daianastudio`, and an `images` object with `next`, `python`, and `studio`. Every image record must contain:
+The version 1 contract contains `schema_version: 1`, `deployment_mode: "complete-stack-replacement"`, and exactly three image records under `images`: `next`, `python`, and `studio`. Every image record must contain:
 
 | Field | Contract |
 |---|---|
@@ -92,11 +91,11 @@ The version 1 contract contains `schema_version: 1`, the exact rollout order `da
 | `index_digest` | Authoritative OCI index digest, identical to the reference digest |
 | `source_commit` | 40-character lowercase hexadecimal source commit SHA |
 
-The entire bundle is validated before snapshots, migrations, pulls, or Portainer changes. Missing records, mutable-only references, invalid provenance, digest mismatches, unknown schema versions, and changed rollout order fail closed. There is no tag fallback.
+The bundle is read once, then the same captured bytes are validated, hashed, and converted to a literal JSON Compose override. Missing or extra records, mutable-only references, invalid provenance, digest mismatches, and unknown schema versions fail closed. There is no tag fallback or partial application.
 
-`DAIANA_BUNDLE_SCOPE` is `all` by default. `pair` applies Next and Python together; `studio` applies only Studio. There is deliberately no Next-only or Python-only scope. Regardless of scope, a production-ready bundle must contain valid digest-bound records for all three applications.
+After all existing preconditions and migrations complete, the installer pre-pulls all three images. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all three literal references; it does not claim a sequential service rollout. Migration sequencing remains a separate deployment concern.
 
-Bundle application starts after the rollback snapshot is saved and finishes after the Portainer app stack update. Snapshot `metadata.json` records the selected bundle SHA-256 and scope. Rollback restores the prior rendered compose/images and does not reverse migrations or persisted data.
+Before update, the installer requires the exact current Portainer stack content and stores it with the bundle SHA-256 in snapshot metadata. Rollback submits that stored content directly, so image references are not re-resolved from current environment values or repository defaults. Rollback still does not reverse migrations or persisted data.
 
 Phase 2 inserts approved Next, Python, and Studio index digests and source commits into a release bundle. Until the Studio index digest is available, do not publish or select a production bundle.
 

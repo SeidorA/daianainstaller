@@ -906,19 +906,11 @@ render_compose() {
 compose_service_image() {
   local compose_file="$1"
   local service_name="$2"
-  local image variable default_value
-  image="$(awk -v service="$service_name" '
+  awk -v service="$service_name" '
     $0 ~ "^  " service ":$" { in_service=1; next }
     in_service && $0 ~ /^  [A-Za-z0-9_-]+:$/ { in_service=0 }
     in_service && $1 == "image:" { print $2; exit }
-  ' "$compose_file")"
-  if [[ "$image" =~ ^\$\{([A-Za-z_][A-Za-z0-9_]*):-([^\}]*)\}$ ]]; then
-    variable="${BASH_REMATCH[1]}"
-    default_value="${BASH_REMATCH[2]}"
-    printf '%s' "${!variable:-$default_value}"
-  else
-    printf '%s' "$image"
-  fi
+  ' "$compose_file"
 }
 
 normalize_daiana_version() {
@@ -963,11 +955,12 @@ prepare_update_app_compose_files() {
   fi
 
   if [ -n "${DAIANA_DEPLOYMENT_BUNDLE:-}" ]; then
+    [ "$ACTION" = "update" ] || die "Deployment bundles may only be selected during update"
     load_deployment_bundle "$DAIANA_DEPLOYMENT_BUNDLE"
     UPDATE_COMPOSE_OVERRIDE_FILE="$(mktemp)"
-    write_deployment_bundle_override "$UPDATE_COMPOSE_OVERRIDE_FILE" "$BUNDLE_SCOPE"
+    write_deployment_bundle_override "$UPDATE_COMPOSE_OVERRIDE_FILE"
     APP_DEPLOY_COMPOSE_FILES=("${APP_COMPOSE_FILES[@]}" "$UPDATE_COMPOSE_OVERRIDE_FILE")
-    log "Validated deployment bundle sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE)"
+    log "Validated complete deployment bundle sha256:$BUNDLE_SHA256"
     return 0
   fi
 
@@ -1062,30 +1055,25 @@ save_update_snapshot() {
   [ "$DRY_RUN" != "1" ] || return 0
 
   local history_dir="${UPDATE_HISTORY_DIR:-./volumes/daiana/update-history}"
-  local snapshot_id snapshot_dir stack_id stack_content
+  local snapshot_id snapshot_dir stack_id
   snapshot_id="$(date -u +%Y%m%d-%H%M%S)"
   snapshot_dir="$history_dir/$snapshot_id"
   LAST_UPDATE_SNAPSHOT_DIR="$snapshot_dir"
   mkdir -p "$snapshot_dir"
 
   stack_id="$(portainer_stack_id "$APP_STACK_NAME" || true)"
-  stack_content=""
-  if [ -n "$stack_id" ] && [ "$stack_id" != "null" ]; then
-    stack_content="$(portainer_request_json GET "/api/stacks/$stack_id/file?endpointId=$PORTAINER_ENDPOINT_ID" | jq -r '.StackFileContent // .stackFileContent // empty' || true)"
-  fi
-
-  if [ -n "$stack_content" ]; then
-    printf '%s\n' "$stack_content" > "$snapshot_dir/docker-compose.before.yml"
-  else
-    render_compose "$snapshot_dir/docker-compose.before.yml" "${APP_COMPOSE_FILES[@]}"
-  fi
+  [ -n "$stack_id" ] && [ "$stack_id" != "null" ] || die "Cannot snapshot missing Portainer stack: $APP_STACK_NAME"
+  portainer_request_json GET "/api/stacks/$stack_id/file?endpointId=$PORTAINER_ENDPOINT_ID" \
+    | jq -jer '.StackFileContent // .stackFileContent // empty' > "$snapshot_dir/docker-compose.before.yml" \
+    || die "Could not capture exact Portainer stack content"
+  [ -s "$snapshot_dir/docker-compose.before.yml" ] || die "Portainer returned empty stack content"
 
   report_daiana_versions "$snapshot_dir/docker-compose.before.yml" > "$snapshot_dir/versions.before.txt" 2>&1 || true
   jq -n \
     --arg id "$snapshot_id" \
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg stack "$APP_STACK_NAME" \
-    --arg source "portainer-or-local-render" \
+    --arg source "portainer-exact-stack" \
     --argjson selected_bundle "$(deployment_bundle_metadata_json)" \
     '{id:$id, created_at:$created_at, stack:$stack, type:"image-orchestration-rollback", source:$source,
       selected_bundle:$selected_bundle,
@@ -1342,6 +1330,15 @@ portainer_upsert_stack() {
   stack_file="$(mktemp)"
   render_compose "$stack_file" "$@"
 
+  portainer_submit_stack_file "$stack_name" "$stack_env_json" "$stack_registries_json" "$stack_file"
+  rm -f "$stack_file"
+}
+
+portainer_submit_stack_file() {
+  local stack_name="$1"
+  local stack_env_json="$2"
+  local stack_registries_json="${3:-}"
+  local stack_file="$4"
   local body
   body="$(jq -Rs --arg name "$stack_name" --argjson env "$stack_env_json" --arg registries "$stack_registries_json" '
     {Name:$name, StackFileContent:., Env:$env}
@@ -1357,8 +1354,6 @@ portainer_upsert_stack() {
     log "Creating Portainer stack: $stack_name"
     portainer_request_json POST "/api/stacks/create/standalone/string?endpointId=$PORTAINER_ENDPOINT_ID" "$body" >/dev/null
   fi
-
-  rm -f "$stack_file"
 }
 
 ensure_network() {
@@ -1784,7 +1779,7 @@ if [ "$ACTION" = "update" ]; then
     CURRENT_PHASE="pre-pulling rollback images"
     prepull_daiana_images || warn "Could not pre-pull rollback images; Portainer may still require registry access"
     log "Rolling back Daiana app stack via Portainer"
-    portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_DEPLOY_COMPOSE_FILES[@]}"
+    portainer_submit_stack_file "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
     cat <<EOF
 
 Rollback complete.
@@ -1816,9 +1811,6 @@ else
 fi
 
 CURRENT_PHASE="running Daiana database migrations"
-if [ -n "${BUNDLE_FILE:-}" ]; then
-  log "Deployment bundle application start: sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE); rollback snapshot=${LAST_UPDATE_SNAPSHOT_DIR:-none}"
-fi
 run_daiana_migrations
 
 log "Preparing app storage directories"
@@ -1831,12 +1823,19 @@ log "Preparing private registry access for Daiana images"
 PORTAINER_DAIA_REGISTRIES_JSON="$(portainer_ensure_private_registry)"
 
 CURRENT_PHASE="pre-pulling Daiana images"
-prepull_daiana_images || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
+if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
+  prepull_deployment_bundle_images
+else
+  prepull_daiana_images || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
+fi
 
 log "Deploying Daiana app stack via Portainer"
+if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
+  log "Complete deployment bundle replacement start: sha256:$BUNDLE_SHA256; rollback snapshot=$LAST_UPDATE_SNAPSHOT_DIR"
+fi
 portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_DEPLOY_COMPOSE_FILES[@]}"
-if [ -n "${BUNDLE_FILE:-}" ]; then
-  log "Deployment bundle application finish: sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE)"
+if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
+  log "Complete deployment bundle replacement finish: sha256:$BUNDLE_SHA256"
 fi
 
 log "Waiting for NPM API"

@@ -19,79 +19,114 @@ commit_a="$(printf '1%.0s' {1..40})"
 commit_b="$(printf '2%.0s' {1..40})"
 commit_c="$(printf '3%.0s' {1..40})"
 
-for reference in \
-  'registry.example.com/team/app:v1.2.3' \
-  "registry.example.com:5000/team/app@$digest_a" \
-  "registry.example.com/team/app:v1.2.3@$digest_a"; do
+for reference in 'repo/app:v1' "registry.example.com:5000/team/app@$digest_a" "repo/app:v1@$digest_a"; do
   validate_oci_reference "$reference" || fail "valid OCI reference rejected: $reference"
 done
-for reference in \
-  'registry.example.com/team/app:bad tag' \
-  'registry.example.com/team/app@sha256:abc' \
-  'Registry.example.com/team/app:v1'; do
-  if validate_oci_reference "$reference"; then
-    fail "invalid OCI reference accepted: $reference"
-  fi
+for reference in 'repo/app:bad tag' 'repo/app@sha256:abc' $'repo/app:v1\nservices:'; do
+  if validate_oci_reference "$reference"; then fail "invalid OCI reference accepted"; fi
 done
-[[ "$(image_tag "registry.example.com:5000/team/app:v1.2.3@$digest_a")" = v1.2.3 ]] || fail "tag@digest parsing corrupted the tag"
-[[ -z "$(image_tag "registry.example.com:5000/team/app@$digest_a")" ]] || fail "registry port was parsed as a tag"
-pass "OCI references preserve tags, registry ports, and digest suffixes"
+[[ "$(image_tag "registry.example.com:5000/team/app:v1@$digest_a")" = v1 ]] || fail "tag@digest parsing failed"
+[[ -z "$(image_tag "registry.example.com:5000/team/app@$digest_a")" ]] || fail "registry port parsed as tag"
+pass "OCI validation is single-line and digest-aware"
 
 bundle="$TMP_DIR/bundle.json"
 jq -n \
-  --arg next "registry.example.com/daiana/next:v1@$digest_a" \
-  --arg python "registry.example.com/daiana/python@$digest_b" \
-  --arg studio "registry.example.com/daiana/studio:v2@$digest_c" \
+  --arg next "registry.example.com/next:v1@$digest_a" \
+  --arg python "registry.example.com/python@$digest_b" \
+  --arg studio "registry.example.com/studio:v2@$digest_c" \
   --arg da "$digest_a" --arg db "$digest_b" --arg dc "$digest_c" \
   --arg ca "$commit_a" --arg cb "$commit_b" --arg cc "$commit_c" \
-  '{schema_version:1, rollout_order:["daianapython","daiananext","daianastudio"], images:{
+  '{schema_version:1,deployment_mode:"complete-stack-replacement",images:{
     next:{reference:$next,index_digest:$da,source_commit:$ca},
     python:{reference:$python,index_digest:$db,source_commit:$cb},
     studio:{reference:$studio,index_digest:$dc,source_commit:$cc}}}' > "$bundle"
 
-validate_deployment_bundle "$bundle" || fail "valid bundle rejected"
-DAIANA_BUNDLE_SCOPE=all load_deployment_bundle "$bundle"
-override="$TMP_DIR/override.yml"
-write_deployment_bundle_override "$override" all
-grep -q "image: registry.example.com/daiana/next:v1@$digest_a" "$override" || fail "tag@digest was corrupted"
-grep -q "image: registry.example.com/daiana/python@$digest_b" "$override" || fail "Python digest reference missing"
-grep -q "image: registry.example.com/daiana/studio:v2@$digest_c" "$override" || fail "Studio digest reference missing"
-pass "valid bundle renders complete full references"
-
-write_deployment_bundle_override "$override" pair
-grep -q '^  daiananext:' "$override" || fail "pair omitted Next"
-grep -q '^  daianapython:' "$override" || fail "pair omitted Python"
-if grep -q '^  daianastudio:' "$override"; then fail "pair unexpectedly included Studio"; fi
-if DAIANA_BUNDLE_SCOPE=next load_deployment_bundle "$bundle"; then
-  fail "partial pair scope accepted"
-fi
-pass "Next and Python are selectable only as one pair"
+original="$(<"$bundle")"
+load_deployment_bundle "$bundle" || fail "valid complete bundle rejected"
+expected_hash="$(deployment_bundle_sha256 "$original")"
+[[ "$BUNDLE_SHA256" = "$expected_hash" ]] || fail "captured bytes hash mismatch"
+printf '{"schema_version":0}\n' > "$bundle"
+override="$TMP_DIR/override.json"
+write_deployment_bundle_override "$override"
+[[ "$BUNDLE_SHA256" = "$expected_hash" ]] || fail "bundle hash changed after source mutation"
+[[ "$(jq -r '.services.daiananext.image' "$override")" = "registry.example.com/next:v1@$digest_a" ]] || fail "captured Next ref changed"
+[[ "$(jq -r '.services.daianapython.image' "$override")" = "registry.example.com/python@$digest_b" ]] || fail "captured Python ref changed"
+[[ "$(jq -r '.services.daianastudio.image' "$override")" = "registry.example.com/studio:v2@$digest_c" ]] || fail "captured Studio ref changed"
+[[ "$(jq '.services | length' "$override")" -eq 3 ]] || fail "override is not exactly three services"
+pass "bundle is read once and emits one complete JSON override"
 
 invalid="$TMP_DIR/invalid.json"
-jq 'del(.images.python)' "$bundle" > "$invalid"
-if validate_deployment_bundle "$invalid"; then fail "partial bundle accepted"; fi
-jq '.images.next.source_commit = "1234"' "$bundle" > "$invalid"
-if validate_deployment_bundle "$invalid"; then fail "invalid source SHA accepted"; fi
-jq ".images.next.index_digest = \"$digest_b\"" "$bundle" > "$invalid"
-if validate_deployment_bundle "$invalid"; then fail "mismatched index digest accepted"; fi
-jq '.rollout_order = ["daiananext","daianapython","daianastudio"]' "$bundle" > "$invalid"
-if validate_deployment_bundle "$invalid"; then fail "invalid rollout order accepted"; fi
-pass "bundle validation fails closed on structure and provenance"
+for filter in \
+  'del(.images.python)' \
+  '.images.next.source_commit = "1234"' \
+  ".images.next.index_digest = \"$digest_b\"" \
+  '.images.studio.reference = "registry.example.com/studio:v2"' \
+  '.images.extra = .images.next'; do
+  jq "$filter" <<<"$original" > "$invalid"
+  document="$(<"$invalid")"
+  if validate_deployment_bundle "$document"; then fail "invalid or partial bundle accepted: $filter"; fi
+done
+pass "partial, mutable, mismatched, and non-strict bundles fail closed"
+if grep -Eq 'BUNDLE_SCOPE|rollout_order' "$ROOT_DIR/utils/deployment-bundle.sh" "$ROOT_DIR/install-daiana.sh" "$ROOT_DIR/docs/update.md"; then
+  fail "obsolete partial scope or rollout contract remains"
+fi
+grep -q '^    image: cloudseidoranalytics/daiana:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Next default pin changed"
+grep -q '^    image: cloudseidoranalytics/daianapython:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Python default pin changed"
+grep -q '^    image: cloudseidoranalytics/daianastudio:v3.1.2$' "$ROOT_DIR/docker-compose.app.yml" || fail "Studio default pin changed"
+pass "partial scopes are absent and default pins remain literal"
 
-DAIANA_BUNDLE_SCOPE=all load_deployment_bundle "$bundle"
-metadata="$(deployment_bundle_metadata_json)"
-[[ "$(jq -r '.sha256' <<<"$metadata")" = "$BUNDLE_SHA256" ]] || fail "rollback metadata hash missing"
-[[ "$(jq -r '.scope' <<<"$metadata")" = all ]] || fail "rollback metadata scope missing"
-pass "rollback metadata identifies the selected bundle"
+PULL_LOG=""
+PULL_FAIL_IMAGE="$BUNDLE_NEXT_IMAGE"
+docker_cmd() {
+  PULL_LOG="${PULL_LOG}${2}\n"
+  [ "$2" != "$PULL_FAIL_IMAGE" ]
+}
+PORTAINER_CALLED=0
+prepull_deployment_bundle_images && PORTAINER_CALLED=1 || true
+[[ "$PORTAINER_CALLED" -eq 0 ]] || fail "Portainer boundary crossed after pull failure"
+[[ "$PULL_LOG" == *"$BUNDLE_PYTHON_IMAGE"*"$BUNDLE_NEXT_IMAGE"* ]] || fail "pull order incomplete"
+[[ "$PULL_LOG" != *"$BUNDLE_STUDIO_IMAGE"* ]] || fail "pull continued after failure"
+PULL_FAIL_IMAGE=""
+PULL_LOG=""
+prepull_deployment_bundle_images || fail "complete pre-pull failed"
+[[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 3 ]] || fail "not all three images were pulled"
+pass "all three pulls are required before the Portainer boundary"
+pull_line="$(grep -n '  prepull_deployment_bundle_images$' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+start_line="$(grep -n 'Complete deployment bundle replacement start' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+submit_line="$(grep -n '^portainer_upsert_stack .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+finish_line="$(grep -n 'Complete deployment bundle replacement finish' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+[[ "$pull_line" -lt "$start_line" && "$start_line" -lt "$submit_line" && "$submit_line" -lt "$finish_line" ]] \
+  || fail "bundle start/finish do not bracket only the Portainer update"
+pass "bundle boundary begins after pulls and finishes after submission"
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  DAIANA_NEXT_IMAGE="registry.example.com/daiana/next:v1@$digest_a" \
-  DAIANA_PYTHON_IMAGE="registry.example.com/daiana/python@$digest_b" \
-  DAIANA_STUDIO_IMAGE="registry.example.com/daiana/studio:v2@$digest_c" \
-    docker compose -f "$ROOT_DIR/docker-compose.app.yml" config --images > "$TMP_DIR/compose-images.txt"
-  grep -Fxq "registry.example.com/daiana/next:v1@$digest_a" "$TMP_DIR/compose-images.txt" || fail "Compose corrupted tag@digest"
-  grep -Fxq "registry.example.com/daiana/python@$digest_b" "$TMP_DIR/compose-images.txt" || fail "Compose corrupted digest reference"
-  pass "Compose interpolation preserves digest-bound references"
+  final_stack="$TMP_DIR/final-stack.yml"
+  docker compose --env-file "$ROOT_DIR/.env.example" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/docker-compose.app.yml" -f "$override" \
+    config --no-interpolate > "$final_stack"
+  images="$(docker compose --env-file "$ROOT_DIR/.env.example" -f "$final_stack" config --images)"
+  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
+    grep -Fxq "$reference" <<<"$images" || fail "final stack omitted exact ref: $reference"
+  done
+  awk '/^portainer_submit_stack_file\(\)/,/^}/' "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/portainer-submit.sh"
+  # shellcheck source=/dev/null
+  source "$TMP_DIR/portainer-submit.sh"
+  log() { :; }
+  portainer_stack_id() { printf '7'; }
+  portainer_request_json() { CAPTURED_PAYLOAD="$3"; }
+  CAPTURED_PAYLOAD=""
+  PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app '[]' '[2]' "$final_stack"
+  jq -jr '.StackFileContent' <<<"$CAPTURED_PAYLOAD" > "$TMP_DIR/submitted-stack.yml"
+  cmp -s "$final_stack" "$TMP_DIR/submitted-stack.yml" || fail "Portainer payload changed stack bytes"
+  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
+    grep -Fq "$reference" "$TMP_DIR/submitted-stack.yml" || fail "Portainer payload omitted exact ref"
+  done
+  cp "$final_stack" "$TMP_DIR/docker-compose.before.yml"
+  CAPTURED_PAYLOAD=""
+  DAIANA_NEXT_IMAGE=hostile DAIANA_PYTHON_IMAGE=hostile DAIANA_STUDIO_IMAGE=hostile \
+    PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app '[]' '[2]' "$TMP_DIR/docker-compose.before.yml"
+  jq -jr '.StackFileContent' <<<"$CAPTURED_PAYLOAD" > "$TMP_DIR/rollback-submitted.yml"
+  cmp -s "$TMP_DIR/docker-compose.before.yml" "$TMP_DIR/rollback-submitted.yml" || fail "rollback re-rendered stored stack"
+  pass "submitted stack and rollback retain all exact literal refs"
 else
   printf 'SKIP: Docker Compose unavailable\n'
 fi
