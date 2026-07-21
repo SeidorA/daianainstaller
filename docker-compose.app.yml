@@ -1,6 +1,6 @@
 services:
   daiananext:
-    image: cloudseidoranalytics/daiana:v2.1.9
+    image: ${DAIANA_NEXT_IMAGE:-cloudseidoranalytics/daiana:v2.1.9}
     container_name: daiana-next
     restart: unless-stopped
     volumes:
@@ -17,7 +17,7 @@ services:
         condition: service_healthy
 
   daianapython:
-    image: cloudseidoranalytics/daianapython:v2.1.9
+    image: ${DAIANA_PYTHON_IMAGE:-cloudseidoranalytics/daianapython:v2.1.9}
     container_name: daiana-python
     restart: unless-stopped
     working_dir: /app
@@ -129,7 +129,7 @@ services:
          condition: service_healthy
 
   daianastudio:
-    image: cloudseidoranalytics/daianastudio:v3.1.2
+    image: ${DAIANA_STUDIO_IMAGE:-cloudseidoranalytics/daianastudio:v3.1.2}
     container_name: daiana-studio
     restart: unless-stopped
     environment:

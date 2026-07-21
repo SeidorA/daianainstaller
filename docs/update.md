@@ -74,6 +74,32 @@ Rules:
 - `QDRANT_TARGET_VERSION` is used exactly as provided.
 - Source compose files are not rewritten during `update`; the selected versions are applied through a temporary compose override sent to Portainer.
 
+## Digest-bound deployment bundles
+
+Phase 1 accepts an explicitly selected JSON deployment bundle without changing any default image pin:
+
+```bash
+DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/daiana-bundle.json \
+DAIANA_BUNDLE_SCOPE=all \
+bash update-daiana.sh
+```
+
+The version 1 contract contains `schema_version: 1`, the exact rollout order `daianapython`, `daiananext`, `daianastudio`, and an `images` object with `next`, `python`, and `studio`. Every image record must contain:
+
+| Field | Contract |
+|---|---|
+| `reference` | Full OCI reference ending in `@sha256:<64 lowercase hex characters>`; an optional tag may precede the digest |
+| `index_digest` | Authoritative OCI index digest, identical to the reference digest |
+| `source_commit` | 40-character lowercase hexadecimal source commit SHA |
+
+The entire bundle is validated before snapshots, migrations, pulls, or Portainer changes. Missing records, mutable-only references, invalid provenance, digest mismatches, unknown schema versions, and changed rollout order fail closed. There is no tag fallback.
+
+`DAIANA_BUNDLE_SCOPE` is `all` by default. `pair` applies Next and Python together; `studio` applies only Studio. There is deliberately no Next-only or Python-only scope. Regardless of scope, a production-ready bundle must contain valid digest-bound records for all three applications.
+
+Bundle application starts after the rollback snapshot is saved and finishes after the Portainer app stack update. Snapshot `metadata.json` records the selected bundle SHA-256 and scope. Rollback restores the prior rendered compose/images and does not reverse migrations or persisted data.
+
+Phase 2 inserts approved Next, Python, and Studio index digests and source commits into a release bundle. Until the Studio index digest is available, do not publish or select a production bundle.
+
 ## Rollback
 
 Each normal update saves a rollback snapshot under:

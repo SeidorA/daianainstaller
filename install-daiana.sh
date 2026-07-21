@@ -50,6 +50,8 @@ run() {
 
 # shellcheck source=utils/daiana-migrations.sh
 source "$ROOT_DIR/utils/daiana-migrations.sh"
+# shellcheck source=utils/deployment-bundle.sh
+source "$ROOT_DIR/utils/deployment-bundle.sh"
 
 prompt_yes_no() {
   local question="$1"
@@ -904,16 +906,19 @@ render_compose() {
 compose_service_image() {
   local compose_file="$1"
   local service_name="$2"
-  awk -v service="$service_name" '
+  local image variable default_value
+  image="$(awk -v service="$service_name" '
     $0 ~ "^  " service ":$" { in_service=1; next }
     in_service && $0 ~ /^  [A-Za-z0-9_-]+:$/ { in_service=0 }
     in_service && $1 == "image:" { print $2; exit }
-  ' "$compose_file"
-}
-
-image_tag() {
-  local image="$1"
-  printf '%s' "${image##*:}"
+  ' "$compose_file")"
+  if [[ "$image" =~ ^\$\{([A-Za-z_][A-Za-z0-9_]*):-([^\}]*)\}$ ]]; then
+    variable="${BASH_REMATCH[1]}"
+    default_value="${BASH_REMATCH[2]}"
+    printf '%s' "${!variable:-$default_value}"
+  else
+    printf '%s' "$image"
+  fi
 }
 
 normalize_daiana_version() {
@@ -952,11 +957,21 @@ write_update_compose_override() {
 }
 
 prepare_update_app_compose_files() {
-  [ "$ACTION" = "update" ] || return 0
   if [ "$ROLLBACK_MODE" = "1" ]; then
     prepare_rollback_app_compose_files
     return 0
   fi
+
+  if [ -n "${DAIANA_DEPLOYMENT_BUNDLE:-}" ]; then
+    load_deployment_bundle "$DAIANA_DEPLOYMENT_BUNDLE"
+    UPDATE_COMPOSE_OVERRIDE_FILE="$(mktemp)"
+    write_deployment_bundle_override "$UPDATE_COMPOSE_OVERRIDE_FILE" "$BUNDLE_SCOPE"
+    APP_DEPLOY_COMPOSE_FILES=("${APP_COMPOSE_FILES[@]}" "$UPDATE_COMPOSE_OVERRIDE_FILE")
+    log "Validated deployment bundle sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE)"
+    return 0
+  fi
+
+  [ "$ACTION" = "update" ] || return 0
 
   local default_daiana_version target_daiana_version
   local webui_version studio_version qdrant_version
@@ -1050,6 +1065,7 @@ save_update_snapshot() {
   local snapshot_id snapshot_dir stack_id stack_content
   snapshot_id="$(date -u +%Y%m%d-%H%M%S)"
   snapshot_dir="$history_dir/$snapshot_id"
+  LAST_UPDATE_SNAPSHOT_DIR="$snapshot_dir"
   mkdir -p "$snapshot_dir"
 
   stack_id="$(portainer_stack_id "$APP_STACK_NAME" || true)"
@@ -1070,7 +1086,10 @@ save_update_snapshot() {
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg stack "$APP_STACK_NAME" \
     --arg source "portainer-or-local-render" \
-    '{id:$id, created_at:$created_at, stack:$stack, type:"image-orchestration-rollback", source:$source, note:"Restores compose/images only; does not roll back databases, migrations, or volumes."}' \
+    --argjson selected_bundle "$(deployment_bundle_metadata_json)" \
+    '{id:$id, created_at:$created_at, stack:$stack, type:"image-orchestration-rollback", source:$source,
+      selected_bundle:$selected_bundle,
+      note:"Restores compose/images only; does not roll back databases, migrations, or volumes."}' \
     > "$snapshot_dir/metadata.json"
 
   log "Saved update rollback snapshot: $snapshot_dir"
@@ -1476,6 +1495,7 @@ APP_DEPLOY_COMPOSE_FILES=("${APP_COMPOSE_FILES[@]}")
 UPDATE_COMPOSE_OVERRIDE_FILE=""
 UPDATE_HISTORY_DIR="${UPDATE_HISTORY_DIR:-./volumes/daiana/update-history}"
 ROLLBACK_SNAPSHOT_DIR=""
+LAST_UPDATE_SNAPSHOT_DIR=""
 
 SUPABASE_CORE_CONTAINERS=(
   supabase-studio
@@ -1796,6 +1816,9 @@ else
 fi
 
 CURRENT_PHASE="running Daiana database migrations"
+if [ -n "${BUNDLE_FILE:-}" ]; then
+  log "Deployment bundle application start: sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE); rollback snapshot=${LAST_UPDATE_SNAPSHOT_DIR:-none}"
+fi
 run_daiana_migrations
 
 log "Preparing app storage directories"
@@ -1812,6 +1835,9 @@ prepull_daiana_images || warn "Could not pre-pull Daiana images; Portainer may s
 
 log "Deploying Daiana app stack via Portainer"
 portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_DEPLOY_COMPOSE_FILES[@]}"
+if [ -n "${BUNDLE_FILE:-}" ]; then
+  log "Deployment bundle application finish: sha256:$BUNDLE_SHA256 (scope=$BUNDLE_SCOPE)"
+fi
 
 log "Waiting for NPM API"
 wait_for_http "$NPM_URL/api" "NPM API" 180 2 1 || die "NPM API did not become ready"
