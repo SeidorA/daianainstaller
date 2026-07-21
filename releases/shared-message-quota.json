@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "deployment_mode": "complete-stack-replacement",
+  "images": {
+    "next": {
+      "reference": "cloudseidoranalytics/daiananext@sha256:3a4e41032300e57287b8b6a303a5b5639cd50430b6854942261e9d55dd6d440d",
+      "index_digest": "sha256:3a4e41032300e57287b8b6a303a5b5639cd50430b6854942261e9d55dd6d440d",
+      "source_commit": "7d4614dfce1905064dbdbf74dba6a7a120151278"
+    },
+    "python": {
+      "reference": "cloudseidoranalytics/daianapython@sha256:1a3ce01cec523cc648e0a440371f606a44505420cae06375cf7a660003267147",
+      "index_digest": "sha256:1a3ce01cec523cc648e0a440371f606a44505420cae06375cf7a660003267147",
+      "source_commit": "eeba8a193c25ed4c603924b6b954b1814ba60bf2"
+    },
+    "studio": {
+      "reference": "cloudseidoranalytics/daianastudio@sha256:ffa2bcca921bb5a921cf61d6535ab197b74082052a9f2448585f6d5ff3840609",
+      "index_digest": "sha256:ffa2bcca921bb5a921cf61d6535ab197b74082052a9f2448585f6d5ff3840609",
+      "source_commit": "ed97cbcc282279870a413350f962d8e3c9aa4e5d"
+    }
+  }
+}

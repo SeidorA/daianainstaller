@@ -76,7 +76,7 @@ Rules:
 
 ## Digest-bound deployment bundles
 
-Phase 1 accepts an explicitly selected JSON deployment bundle without changing any default image pin:
+The installer accepts an explicitly selected JSON deployment bundle without changing any default image pin:
 
 ```bash
 DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/daiana-bundle.json \
@@ -93,11 +93,18 @@ The version 1 contract contains `schema_version: 1`, `deployment_mode: "complete
 
 The bundle is read once, then the same captured bytes are validated, hashed, and converted to a literal JSON Compose override. Missing or extra records, mutable-only references, invalid provenance, digest mismatches, and unknown schema versions fail closed. There is no tag fallback or partial application.
 
-After all existing preconditions and migrations complete, the installer pre-pulls all three images. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all three literal references; it does not claim a sequential service rollout. Migration sequencing remains a separate deployment concern.
+After all existing preconditions complete, the installer applies pending database migrations first and then pre-pulls all three images. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all three literal references; it does not perform or claim a sequential per-service rollout.
 
 Before update, the installer requires the exact current Portainer stack content and Env array, stores the Env in a protected snapshot file, and records its SHA-256 in metadata. Rollback submits both saved values directly, so placeholders are not re-resolved from current environment values or repository defaults. Rollback still does not reverse migrations or persisted data.
 
-Phase 2 inserts approved Next, Python, and Studio index digests and source commits into a release bundle. Until the Studio index digest is available, do not publish or select a production bundle.
+The approved shared-message-quota bundle is checked in at `releases/shared-message-quota.json`. It remains inactive unless an operator explicitly selects it for a controlled update from the repository root:
+
+```bash
+DAIANA_DEPLOYMENT_BUNDLE="$PWD/releases/shared-message-quota.json" \
+bash update-daiana.sh
+```
+
+This selection runs the installer database migration before one complete application stack replacement. Back up PostgreSQL and review the rollback limitations below before running it.
 
 ## Rollback
 
