@@ -13,7 +13,7 @@ bash update-daiana.sh
 
 This is an opt-in, complete replacement of `daiananext`, `daianapython`, and `daianastudio` using digest-bound images. The application bundle version `v2.2.0` is independent from the Installer version in `VERSION` (`0.2.0`). Selecting the bundle does not rewrite source Compose files or retag the Installer.
 
-The update remains migration-first: it saves an exact stack and Portainer Env snapshot, applies pending forward-only database migrations, pre-pulls all three images, and only then submits one application stack replacement. A pull or validation failure stops before Portainer mutation.
+The update remains migration-first: it saves an exact stack and Portainer Env snapshot, applies pending forward-only database migrations, pre-pulls all three images, and only then submits one application stack replacement. A pull or validation failure stops before Portainer mutation. After submission, bounded readiness checks must pass for Next, Python, and Studio before the installer reports success. A failed check records recovery details in the snapshot metadata and prints the exact rollback command; rollback is not automatic because it cannot reverse migrations or persisted data.
 
 > **Rollback boundary:** Installer rollback restores the saved Compose stack and Portainer Env. It does not reverse database migrations or any persisted data. Review the snapshot before updating and keep the PostgreSQL backup until the application is verified.
 

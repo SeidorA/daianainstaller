@@ -106,9 +106,17 @@ SQL
     SELECT NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,timestamptz)', 'EXECUTE');
     SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)', 'EXECUTE');
     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)', 'EXECUTE');
+    SELECT has_function_privilege('service_role', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE');
+    SELECT NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE');
+    SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+    SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+    SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
+    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
+    SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
+    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;
     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
-  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 14 ] || die "PostgreSQL $pg_version historical/replay/checksum/object/RPC/privilege checks failed: $result"
+  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 22 ] || die "PostgreSQL $pg_version historical/replay/checksum/object/RPC/privilege checks failed: $result"
 
   docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -186,6 +194,117 @@ SQL
     SELECT \"reservedMessages\" = 1 AND \"consumedMessages\" = 2 FROM public.tenant_message_quota_periods WHERE \"idTenant\" = 1;
     SELECT count(*) = 0 FROM public.history WHERE message = 'reject';")"
   [ "$(printf '%s\n' "$rollback_state" | grep -c '^t$')" -eq 3 ] || die "PostgreSQL $pg_version finalize did not roll back atomically: $rollback_state"
+
+  docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  v_result jsonb;
+  v_response jsonb;
+  v_replayed jsonb;
+  v_consumed integer;
+  v_reserved integer;
+  v_history_count bigint;
+BEGIN
+  v_result := public.reserve_tenant_message_quota(
+    1, 'replay-exact', '10', '42', repeat('a', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'replay-aware reserve failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'replay-exact', 'integration',
+    '[{"idBot":10,"idUser":42,"message":"replay question","created":"user"},{"idBot":10,"idUser":42,"message":"replay answer","created":"bot"}]'::jsonb,
+    '{"ok":true,"text":"stored response"}'::jsonb, now()
+  );
+  IF v_result->>'status' <> 'consumed' OR v_result->'response'->>'text' <> 'stored response'
+     OR jsonb_array_length(v_result->'history') <> 1 THEN
+    RAISE EXCEPTION 'replay-aware finalize failed: %', v_result;
+  END IF;
+  SELECT "consumedMessages", "reservedMessages" INTO v_consumed, v_reserved
+  FROM public.tenant_message_quota_periods WHERE "idTenant" = 1;
+  SELECT count(*) INTO v_history_count FROM public.history;
+  v_replayed := public.reserve_tenant_message_quota(
+    1, 'replay-exact', '10', '42', repeat('a', 64), 'integration', now()
+  );
+  IF v_replayed->>'status' <> 'already_consumed'
+     OR v_replayed->'response' IS DISTINCT FROM v_result->'response'
+     OR jsonb_array_length(v_replayed->'history') <> 1 THEN
+    RAISE EXCEPTION 'same replay identity did not return stored response: %', v_replayed;
+  END IF;
+  IF (SELECT "consumedMessages" FROM public.tenant_message_quota_periods WHERE "idTenant" = 1) <> v_consumed
+     OR (SELECT "reservedMessages" FROM public.tenant_message_quota_periods WHERE "idTenant" = 1) <> v_reserved
+     OR (SELECT count(*) FROM public.history) <> v_history_count THEN
+    RAISE EXCEPTION 'same replay identity caused an extra state transition';
+  END IF;
+  IF public.reserve_tenant_message_quota(
+       1, 'replay-exact', '10', '42', repeat('b', 64), 'integration', now()
+     )->>'status' <> 'identity_mismatch' THEN
+    RAISE EXCEPTION 'reserve identity mismatch was accepted';
+  END IF;
+  IF public.finalize_tenant_message_quota_turn(
+       'replay-exact', 'integration',
+       '[{"idBot":10,"idUser":99,"message":"question","created":"user"},{"idBot":10,"idUser":99,"message":"answer","created":"bot"}]'::jsonb,
+       '{"ok":true}'::jsonb, now()
+     )->>'status' <> 'identity_mismatch' THEN
+    RAISE EXCEPTION 'finalize identity mismatch was accepted';
+  END IF;
+
+  IF public.reserve_tenant_message_quota(
+       1, 'pre-replay', '10', '1', repeat('c', 64), 'integration', now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'pre-migration reservation was treated as replayable';
+  END IF;
+  IF public.finalize_tenant_message_quota_turn(
+       'pre-replay', 'integration',
+       '[{"idBot":10,"idUser":1,"message":"question","created":"user"},{"idBot":10,"idUser":1,"message":"answer","created":"bot"}]'::jsonb,
+       '{"ok":true}'::jsonb, now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'legacy finalization was treated as replayable';
+  END IF;
+
+  v_result := public.reserve_tenant_message_quota(
+    1, 'oversized-replay', '10', '43', repeat('d', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'oversized replay reserve failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'oversized-replay', 'integration',
+    '[{"idBot":10,"idUser":43,"message":"large question","created":"user"},{"idBot":10,"idUser":43,"message":"large answer","created":"bot"}]'::jsonb,
+    jsonb_build_object('ok', true, 'text', repeat('t', 9000), 'payload', repeat('x', 300000)), now()
+  );
+  v_response := v_result->'response';
+  IF v_result->>'status' <> 'consumed' OR v_response->>'type' <> 'degraded'
+     OR (v_response->>'replayTruncated')::boolean IS NOT TRUE
+     OR octet_length(v_response->>'text') <> 8192
+     OR v_response ? 'payload'
+     OR pg_column_size(v_response) > 262144 THEN
+    RAISE EXCEPTION 'oversized replay did not use bounded fallback: %', v_result;
+  END IF;
+  v_replayed := public.reserve_tenant_message_quota(
+    1, 'oversized-replay', '10', '43', repeat('d', 64), 'integration', now()
+  );
+  IF v_replayed->>'status' <> 'already_consumed' OR v_replayed->'response' IS DISTINCT FROM v_response THEN
+    RAISE EXCEPTION 'bounded fallback was not deterministic on replay: %', v_replayed;
+  END IF;
+
+  v_result := public.reserve_tenant_message_quota(
+    1, 'mixed-new-old', '10', '44', repeat('e', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'new reserve for old finalizer failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'mixed-new-old', 'integration',
+    '[{"idBot":10,"idUser":44,"message":"mixed question","created":"user"},{"idBot":10,"idUser":44,"message":"mixed answer","created":"bot"}]'::jsonb,
+    now()
+  );
+  IF v_result->>'status' <> 'consumed' THEN RAISE EXCEPTION 'historical finalizer rejected new reservation: %', v_result; END IF;
+  v_result := public.reserve_tenant_message_quota(1, 'mixed-old-new', 'integration', now());
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'historical reserve failed after replay migration: %', v_result; END IF;
+  IF public.reserve_tenant_message_quota(
+       1, 'mixed-old-new', '10', '45', repeat('f', 64), 'integration', now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'historical reservation was incorrectly upgraded to replayable';
+  END IF;
+END;
+$$;
+SQL
+  printf 'PASS: PostgreSQL %s replay-aware overload/idempotency/identity/bounds/compatibility checks\n' "$pg_version"
 
   provisioned="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
     SELECT private.provision_known_studio_mapping() = 'provisioned';
