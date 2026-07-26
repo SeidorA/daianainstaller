@@ -52,6 +52,8 @@ run() {
 source "$ROOT_DIR/utils/daiana-migrations.sh"
 # shellcheck source=utils/deployment-bundle.sh
 source "$ROOT_DIR/utils/deployment-bundle.sh"
+# shellcheck source=utils/update-verification.sh
+source "$ROOT_DIR/utils/update-verification.sh"
 
 prompt_yes_no() {
   local question="$1"
@@ -1125,7 +1127,9 @@ wait_for_http() {
   local max_tries="${3:-120}"
   local delay="${4:-2}"
   local accept_redirect="${5:-0}"
+  local log_response_body="${6:-1}"
   local i=1
+  local response status body
   while [ "$i" -le "$max_tries" ]; do
     response="$(curl -sS "$url" -w '\n%{http_code}' || true)"
     status="${response##*$'\n'}"
@@ -1144,7 +1148,7 @@ wait_for_http() {
     esac
     if [ "$i" -eq 1 ] || [ $((i % 10)) -eq 0 ]; then
       log "Waiting for $label... ($i/$max_tries) [HTTP $status]"
-      [ -n "$body" ] && log "Last response: ${body:0:160}"
+      [ "$log_response_body" = "1" ] && [ -n "$body" ] && log "Last response: ${body:0:160}"
     fi
     sleep "$delay"
     i=$((i + 1))
@@ -1852,6 +1856,11 @@ fi
 portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_DEPLOY_COMPOSE_FILES[@]}"
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   log "Complete deployment bundle replacement finish: sha256:$BUNDLE_SHA256"
+fi
+
+if [ "$ACTION" = "update" ]; then
+  CURRENT_PHASE="verifying updated Daiana services"
+  verify_update_services || die "Updated Daiana services did not become ready; update is incomplete"
 fi
 
 log "Waiting for NPM API"

@@ -69,8 +69,17 @@ INSERT INTO studio.organization VALUES ('ca2a7ece-14c6-458c-9266-5c3d96e547f2');
 INSERT INTO studio.workspace VALUES ('cd469aed-4042-477b-b508-9de39d395056', 'ca2a7ece-14c6-458c-9266-5c3d96e547f2');
 SQL
 
+  migration_dir="$work_dir/migrations"
+  drift_dir="$work_dir/drift"
+  mkdir -p "$migration_dir" "$drift_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$migration_dir/"
+
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container"
-  export DAIANA_MIGRATIONS_DIR="$ROOT_DIR/volumes/db/daiana-migrations"
+  export DAIANA_MIGRATIONS_DIR="$migration_dir"
+  run_daiana_migrations
+  docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -Atqc \
+    "SELECT public.reserve_tenant_message_quota(1, 'pre-replay', 'integration')->>'status'; SELECT public.release_tenant_message_quota(1, 'pre-replay', 'integration');" >/dev/null
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260725170000_upgrade_shared_message_quota_replay.sql" "$migration_dir/"
   run_daiana_migrations
   run_daiana_migrations
 
@@ -85,7 +94,10 @@ SQL
   [ "$lock_elapsed" -ge 2 ] || die "PostgreSQL $pg_version runner did not wait for the global advisory lock"
 
   result="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
-    SELECT count(*) = 1 FROM private.daiana_installer_schema_migrations;
+    SELECT count(*) = 2 FROM private.daiana_installer_schema_migrations;
+    SELECT checksum = 'a006dd4648b127b2cd2629f1a60364d759c729c9469a2978deb754ae6837c689' FROM private.daiana_installer_schema_migrations WHERE version = '20260717120000';
+    SELECT checksum = 'ad89ebdecb3a138be57fcc0535bb73a7569468c7cb518188f4709e1894f1f528' FROM private.daiana_installer_schema_migrations WHERE version = '20260725170000';
+    SELECT result->>'legacy' = 'true' FROM public.tenant_message_quota_reservations WHERE \"requestId\" = 'pre-replay' AND source = 'integration';
     SELECT public.resolve_daiana_tenant_from_studio('ca2a7ece-14c6-458c-9266-5c3d96e547f2', 'cd469aed-4042-477b-b508-9de39d395056') = 1;
     SELECT NOT has_table_privilege('anon', 'public.tenant_message_quota_periods', 'SELECT');
     SELECT NOT has_table_privilege('service_role', 'public.tenant_message_quota_periods', 'INSERT');
@@ -94,9 +106,17 @@ SQL
     SELECT NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,timestamptz)', 'EXECUTE');
     SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)', 'EXECUTE');
     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)', 'EXECUTE');
+    SELECT has_function_privilege('service_role', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE');
+    SELECT NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE');
+    SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+    SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+    SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
+    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
+    SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
+    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;
     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
-  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 11 ] || die "PostgreSQL $pg_version object/RPC/privilege checks failed: $result"
+  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 22 ] || die "PostgreSQL $pg_version historical/replay/checksum/object/RPC/privilege checks failed: $result"
 
   docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -175,6 +195,117 @@ SQL
     SELECT count(*) = 0 FROM public.history WHERE message = 'reject';")"
   [ "$(printf '%s\n' "$rollback_state" | grep -c '^t$')" -eq 3 ] || die "PostgreSQL $pg_version finalize did not roll back atomically: $rollback_state"
 
+  docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  v_result jsonb;
+  v_response jsonb;
+  v_replayed jsonb;
+  v_consumed integer;
+  v_reserved integer;
+  v_history_count bigint;
+BEGIN
+  v_result := public.reserve_tenant_message_quota(
+    1, 'replay-exact', '10', '42', repeat('a', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'replay-aware reserve failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'replay-exact', 'integration',
+    '[{"idBot":10,"idUser":42,"message":"replay question","created":"user"},{"idBot":10,"idUser":42,"message":"replay answer","created":"bot"}]'::jsonb,
+    '{"ok":true,"text":"stored response"}'::jsonb, now()
+  );
+  IF v_result->>'status' <> 'consumed' OR v_result->'response'->>'text' <> 'stored response'
+     OR jsonb_array_length(v_result->'history') <> 1 THEN
+    RAISE EXCEPTION 'replay-aware finalize failed: %', v_result;
+  END IF;
+  SELECT "consumedMessages", "reservedMessages" INTO v_consumed, v_reserved
+  FROM public.tenant_message_quota_periods WHERE "idTenant" = 1;
+  SELECT count(*) INTO v_history_count FROM public.history;
+  v_replayed := public.reserve_tenant_message_quota(
+    1, 'replay-exact', '10', '42', repeat('a', 64), 'integration', now()
+  );
+  IF v_replayed->>'status' <> 'already_consumed'
+     OR v_replayed->'response' IS DISTINCT FROM v_result->'response'
+     OR jsonb_array_length(v_replayed->'history') <> 1 THEN
+    RAISE EXCEPTION 'same replay identity did not return stored response: %', v_replayed;
+  END IF;
+  IF (SELECT "consumedMessages" FROM public.tenant_message_quota_periods WHERE "idTenant" = 1) <> v_consumed
+     OR (SELECT "reservedMessages" FROM public.tenant_message_quota_periods WHERE "idTenant" = 1) <> v_reserved
+     OR (SELECT count(*) FROM public.history) <> v_history_count THEN
+    RAISE EXCEPTION 'same replay identity caused an extra state transition';
+  END IF;
+  IF public.reserve_tenant_message_quota(
+       1, 'replay-exact', '10', '42', repeat('b', 64), 'integration', now()
+     )->>'status' <> 'identity_mismatch' THEN
+    RAISE EXCEPTION 'reserve identity mismatch was accepted';
+  END IF;
+  IF public.finalize_tenant_message_quota_turn(
+       'replay-exact', 'integration',
+       '[{"idBot":10,"idUser":99,"message":"question","created":"user"},{"idBot":10,"idUser":99,"message":"answer","created":"bot"}]'::jsonb,
+       '{"ok":true}'::jsonb, now()
+     )->>'status' <> 'identity_mismatch' THEN
+    RAISE EXCEPTION 'finalize identity mismatch was accepted';
+  END IF;
+
+  IF public.reserve_tenant_message_quota(
+       1, 'pre-replay', '10', '1', repeat('c', 64), 'integration', now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'pre-migration reservation was treated as replayable';
+  END IF;
+  IF public.finalize_tenant_message_quota_turn(
+       'pre-replay', 'integration',
+       '[{"idBot":10,"idUser":1,"message":"question","created":"user"},{"idBot":10,"idUser":1,"message":"answer","created":"bot"}]'::jsonb,
+       '{"ok":true}'::jsonb, now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'legacy finalization was treated as replayable';
+  END IF;
+
+  v_result := public.reserve_tenant_message_quota(
+    1, 'oversized-replay', '10', '43', repeat('d', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'oversized replay reserve failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'oversized-replay', 'integration',
+    '[{"idBot":10,"idUser":43,"message":"large question","created":"user"},{"idBot":10,"idUser":43,"message":"large answer","created":"bot"}]'::jsonb,
+    jsonb_build_object('ok', true, 'text', repeat('t', 9000), 'payload', repeat('x', 300000)), now()
+  );
+  v_response := v_result->'response';
+  IF v_result->>'status' <> 'consumed' OR v_response->>'type' <> 'degraded'
+     OR (v_response->>'replayTruncated')::boolean IS NOT TRUE
+     OR octet_length(v_response->>'text') <> 8192
+     OR v_response ? 'payload'
+     OR pg_column_size(v_response) > 262144 THEN
+    RAISE EXCEPTION 'oversized replay did not use bounded fallback: %', v_result;
+  END IF;
+  v_replayed := public.reserve_tenant_message_quota(
+    1, 'oversized-replay', '10', '43', repeat('d', 64), 'integration', now()
+  );
+  IF v_replayed->>'status' <> 'already_consumed' OR v_replayed->'response' IS DISTINCT FROM v_response THEN
+    RAISE EXCEPTION 'bounded fallback was not deterministic on replay: %', v_replayed;
+  END IF;
+
+  v_result := public.reserve_tenant_message_quota(
+    1, 'mixed-new-old', '10', '44', repeat('e', 64), 'integration', now()
+  );
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'new reserve for old finalizer failed: %', v_result; END IF;
+  v_result := public.finalize_tenant_message_quota_turn(
+    'mixed-new-old', 'integration',
+    '[{"idBot":10,"idUser":44,"message":"mixed question","created":"user"},{"idBot":10,"idUser":44,"message":"mixed answer","created":"bot"}]'::jsonb,
+    now()
+  );
+  IF v_result->>'status' <> 'consumed' THEN RAISE EXCEPTION 'historical finalizer rejected new reservation: %', v_result; END IF;
+  v_result := public.reserve_tenant_message_quota(1, 'mixed-old-new', 'integration', now());
+  IF v_result->>'status' <> 'reserved' THEN RAISE EXCEPTION 'historical reserve failed after replay migration: %', v_result; END IF;
+  IF public.reserve_tenant_message_quota(
+       1, 'mixed-old-new', '10', '45', repeat('f', 64), 'integration', now()
+     )->>'status' <> 'legacy_unreplayable' THEN
+    RAISE EXCEPTION 'historical reservation was incorrectly upgraded to replayable';
+  END IF;
+END;
+$$;
+SQL
+  printf 'PASS: PostgreSQL %s replay-aware overload/idempotency/identity/bounds/compatibility checks\n' "$pg_version"
+
   provisioned="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
     SELECT private.provision_known_studio_mapping() = 'provisioned';
     SELECT count(*) = 1 FROM public.tenant_studio_organization_mappings;
@@ -196,16 +327,16 @@ SQL
   fi
   [[ "$conflict_error" == *'Conflicting fixed Studio organization mapping'* ]] || die "PostgreSQL $pg_version mapping conflict failure was unclear"
 
-  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$work_dir/20260717120000_add_shared_message_quota.sql"
-  printf '\n-- checksum drift test\n' >> "$work_dir/20260717120000_add_shared_message_quota.sql"
-  DAIANA_MIGRATIONS_DIR="$work_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  printf '\n-- checksum drift test\n' >> "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  DAIANA_MIGRATIONS_DIR="$drift_dir"
   export DAIANA_MIGRATIONS_DIR
   if run_daiana_migrations; then die "PostgreSQL $pg_version checksum drift was accepted"; fi
   count="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc 'SELECT count(*) FROM private.daiana_installer_schema_migrations;')"
-  [ "$count" = 1 ] || die "PostgreSQL $pg_version drift changed history"
+  [ "$count" = 2 ] || die "PostgreSQL $pg_version drift changed history"
 
-  rm -f "$work_dir/20260717120000_add_shared_message_quota.sql"
-  printf 'CREATE TABLE public.must_rollback(id integer);\nSELECT 1/0;\n' > "$work_dir/20260717130000_failure.sql"
+  rm -f "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  printf 'CREATE TABLE public.must_rollback(id integer);\nSELECT 1/0;\n' > "$drift_dir/20260717130000_failure.sql"
   if run_daiana_migrations; then die "PostgreSQL $pg_version failing migration succeeded"; fi
   recorded="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT count(*) FROM private.daiana_installer_schema_migrations WHERE version = '20260717130000';")"
   table_exists="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT to_regclass('public.must_rollback') IS NOT NULL;")"

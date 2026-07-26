@@ -55,6 +55,46 @@ write_deployment_bundle_override "$override"
 [[ "$(jq '.services | length' "$override")" -eq 3 ]] || fail "override is not exactly three services"
 pass "bundle is read once and emits one complete JSON override"
 
+assert_checked_in_bundle() {
+  local name="$1" file="$2" expected_hash="$3"
+  local expected_next="$4" expected_python="$5" expected_studio="$6"
+  local checked_override="$TMP_DIR/${name}.override.json"
+
+  load_deployment_bundle "$file" || fail "$name bundle rejected"
+  [[ "$BUNDLE_SHA256" = "$expected_hash" ]] || fail "$name bundle checksum mismatch"
+  [[ "$BUNDLE_NEXT_IMAGE" = "$expected_next" ]] || fail "$name Next reference mismatch"
+  [[ "$BUNDLE_PYTHON_IMAGE" = "$expected_python" ]] || fail "$name Python reference mismatch"
+  [[ "$BUNDLE_STUDIO_IMAGE" = "$expected_studio" ]] || fail "$name Studio reference mismatch"
+  jq -e '
+    .schema_version == 1 and
+    .deployment_mode == "complete-stack-replacement" and
+    (.images | keys == ["next", "python", "studio"]) and
+    ([.images[].reference] | all(test("@sha256:[0-9a-f]{64}$")))
+  ' <<<"$BUNDLE_DOCUMENT" >/dev/null || fail "$name bundle contract mismatch"
+
+  write_deployment_bundle_override "$checked_override"
+  [[ "$(jq '.services | length' "$checked_override")" -eq 3 ]] || fail "$name override is incomplete"
+  [[ "$(jq -r '.services.daiananext.image' "$checked_override")" = "$expected_next" ]] || fail "$name override changed Next"
+  [[ "$(jq -r '.services.daianapython.image' "$checked_override")" = "$expected_python" ]] || fail "$name override changed Python"
+  [[ "$(jq -r '.services.daianastudio.image' "$checked_override")" = "$expected_studio" ]] || fail "$name override changed Studio"
+}
+
+assert_checked_in_bundle \
+  historical-candidate "$ROOT_DIR/releases/shared-message-quota.json" \
+  b9d166f1a398f4a84588dc7b8a66c3e8d63de183416b7ef9a43916093495700b \
+  cloudseidoranalytics/daiananext@sha256:3a4e41032300e57287b8b6a303a5b5639cd50430b6854942261e9d55dd6d440d \
+  cloudseidoranalytics/daianapython@sha256:1a3ce01cec523cc648e0a440371f606a44505420cae06375cf7a660003267147 \
+  cloudseidoranalytics/daianastudio@sha256:ffa2bcca921bb5a921cf61d6535ab197b74082052a9f2448585f6d5ff3840609
+assert_checked_in_bundle \
+  official-v2.2.0 "$ROOT_DIR/releases/v2.2.0.json" \
+  4c8ac82c5b61ce8d83b293dbaac33060124231365a5bf1b4abfe9feff816154e \
+  cloudseidoranalytics/daiana@sha256:9889e14b52230c52f428007ac52e665f695482caa993b2f2271eb7a06e46c173 \
+  cloudseidoranalytics/daianapython@sha256:fe60febd128657e50ee9cd61bc848d7f05e3faf15cb605977d8c81946a3431b6 \
+  cloudseidoranalytics/daianastudio@sha256:18a49d2177a8c648cc451043b554df1a66536f2acf268105e76dc0380d0a46a4
+pass "historical candidate and official v2.2.0 bundles are exact, immutable, and complete"
+load_deployment_bundle "$ROOT_DIR/releases/v2.2.0.json"
+write_deployment_bundle_override "$override"
+
 invalid="$TMP_DIR/invalid.json"
 for filter in \
   'del(.images.python)' \
@@ -72,7 +112,7 @@ if grep -Eq 'BUNDLE_SCOPE|rollout_order' "$ROOT_DIR/utils/deployment-bundle.sh" 
 fi
 grep -q '^    image: cloudseidoranalytics/daiana:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Next default pin changed"
 grep -q '^    image: cloudseidoranalytics/daianapython:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Python default pin changed"
-grep -q '^    image: cloudseidoranalytics/daianastudio:v3.1.2$' "$ROOT_DIR/docker-compose.app.yml" || fail "Studio default pin changed"
+grep -q '^    image: cloudseidoranalytics/daianastudio:v3.1.3$' "$ROOT_DIR/docker-compose.app.yml" || fail "Studio default pin changed"
 pass "partial scopes are absent and default pins remain literal"
 
 PULL_LOG=""
