@@ -16,7 +16,13 @@ See per-service updates below for details. Only the most important changes relev
 - Added forward-only, checksum-tracked Daiana database migrations serialized by a PostgreSQL advisory lock.
 - Added migration gates after fresh-install seeds and before install/update app deployment.
 - Added the shared Studio/Daiana message quota migration, explicit default tenant mapping, hardened RPC privileges, and server-side Studio quota configuration.
+- Added the canonical replay migration for existing shared-message-quota reservations, preserving Installer-owned transaction and PostgREST reload boundaries.
 - Added disposable PostgreSQL 15/17 migration contract, replay, checksum drift, atomic failure, privilege, and RPC smoke tests.
+- Added strict, digest-bound three-service deployment bundles with immutable-reference validation, fail-closed pre-pulls, and complete stack overrides.
+- Added the official opt-in application `v2.2.0` bundle for Next and Python v2.2.0 with Studio v3.1.3; application bundle and Installer versions remain independent.
+- Preserved exact Portainer stack content and Env in rollback snapshots so rollback does not re-render placeholders from current values.
+- Updated the default Studio image to v3.1.3 while retaining the default Next and Python v2.1.9 Compose pins.
+- Included post-v0.1.0 corrections that clarify operator documentation, preserve rollback snapshots during `make wipe`, and reset license seed sequences dynamically.
 
 ⚠️ **Upcoming changes:**
 - ⚠️ **Breaking change** (week of July 6, 2026): Access to the OpenAPI spec at `/rest/v1/` via the anon (publishable) key will be removed. Requests using the service role or new secret keys are unaffected, and data access via `/rest/v1/your_table` or any client library continues to work as it does today. See discussion [#42949](https://github.com/orgs/supabase/discussions/42949).
@@ -26,15 +32,21 @@ Check the main Supabase [changelog](https://github.com/orgs/supabase/discussions
 
 ---
 
-## [v0.1.0](https://github.com/agarcia-seidor/installer/releases/tag/v0.1.0) - 2026-07-08
+## [v0.1.0](https://github.com/SeidorA/daianainstaller/releases/tag/v0.1.0) - 2026-07-08
 
 ### Daiana installer
+- Added the Bash installer flow for bootstrapping Portainer, Nginx Proxy Manager, Supabase, Daiana services, and post-start database seeds.
+- Added private Docker registry authentication and image pre-pulls before Daiana stack deployment.
+- Added waits and guards around Docker access, Supabase Auth migrations, and seed execution, including preservation of Auth migration history.
+- Added macOS-compatible application storage handling and documented installation and runtime environment configuration.
 - Added formal repository version metadata with `VERSION`.
 - Added selectable Daiana image versions during `update`, including optional independently versioned images.
 - Added update rollback snapshots under `volumes/daiana/update-history/<timestamp>/` and `update-daiana.sh --rollback`.
 - Added repository sync guard before update/rollback, with explicit approval before `git pull --ff-only`.
 - Updated Docker Hub registry defaults to `dockerhub-prod-sdr` with URL `docker.io`, while preserving legacy registry compatibility.
 - Bumped Daiana app images to `v2.1.9` and WebUI to `v0.10.2`.
+
+**Historical boundary:** annotated tag `v0.1.0` points to commit `adbe14e611af0f6b34ff06fe664a877176954a16` (tree `0bb6f7f726813b3663ea961c0136c0c7272bb934`). Documentation clarification (`abc1a3b`), snapshot-preserving wipe behavior (`7d65ddd`), and dynamic license seed sequence reset (`bd9185d`) were post-v0.1.0 corrections first included in v0.2.0.
 
 ---
 

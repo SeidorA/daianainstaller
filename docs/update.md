@@ -1,6 +1,21 @@
 # Update
 
-Use the update command to refresh the existing Portainer stacks in place.
+Use the update command to refresh the existing Portainer stacks in place. For the official Daiana application v2.2.0 release, select the checked-in immutable bundle explicitly; this does not change the installer's default Next or Python image pins.
+
+## Official application v2.2.0 bundle
+
+From the repository root, back up PostgreSQL and then run:
+
+```bash
+DAIANA_DEPLOYMENT_BUNDLE="$PWD/releases/v2.2.0.json" \
+bash update-daiana.sh
+```
+
+This is an opt-in, complete replacement of `daiananext`, `daianapython`, and `daianastudio` using digest-bound images. The application bundle version `v2.2.0` is independent from the Installer version in `VERSION` (`0.2.0`). Selecting the bundle does not rewrite source Compose files or retag the Installer.
+
+The update remains migration-first: it saves an exact stack and Portainer Env snapshot, applies pending forward-only database migrations, pre-pulls all three images, and only then submits one application stack replacement. A pull or validation failure stops before Portainer mutation.
+
+> **Rollback boundary:** Installer rollback restores the saved Compose stack and Portainer Env. It does not reverse database migrations or any persisted data. Review the snapshot before updating and keep the PostgreSQL backup until the application is verified.
 
 ## Quick path
 
@@ -97,7 +112,7 @@ After all existing preconditions complete, the installer applies pending databas
 
 Before update, the installer requires the exact current Portainer stack content and Env array, stores the Env in a protected snapshot file, and records its SHA-256 in metadata. Rollback submits both saved values directly, so placeholders are not re-resolved from current environment values or repository defaults. Rollback still does not reverse migrations or persisted data.
 
-The approved shared-message-quota bundle is checked in at `releases/shared-message-quota.json`. It remains inactive unless an operator explicitly selects it for a controlled update from the repository root:
+The historical shared-message-quota candidate is preserved at `releases/shared-message-quota.json` as audit and rollback evidence. It is not the official application v2.2.0 bundle and remains inactive unless an operator explicitly selects it for a controlled historical update from the repository root:
 
 ```bash
 DAIANA_DEPLOYMENT_BUNDLE="$PWD/releases/shared-message-quota.json" \

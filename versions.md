@@ -1,5 +1,13 @@
 # Docker Image Versions
 
+## 2026-07-26
+- Default pin: cloudseidoranalytics/daianastudio:v3.1.3 (prev cloudseidoranalytics/daianastudio:v3.1.2)
+- Official opt-in application bundle `releases/v2.2.0.json`:
+  - cloudseidoranalytics/daiana@sha256:9889e14b52230c52f428007ac52e665f695482caa993b2f2271eb7a06e46c173
+  - cloudseidoranalytics/daianapython@sha256:fe60febd128657e50ee9cd61bc848d7f05e3faf15cb605977d8c81946a3431b6
+  - cloudseidoranalytics/daianastudio@sha256:18a49d2177a8c648cc451043b554df1a66536f2acf268105e76dc0380d0a46a4
+- The default Next and Python Compose pins remain at v2.1.9; the application v2.2.0 bundle is selected explicitly and is independent from Installer v0.2.0.
+
 ## 2026-07-08
 - cloudseidoranalytics/daiana:v2.1.9 (prev cloudseidoranalytics/daiana:v2.1.8)
 - cloudseidoranalytics/daianapython:v2.1.9 (prev cloudseidoranalytics/daianapython:v2.1.8)
