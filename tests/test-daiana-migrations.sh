@@ -131,3 +131,48 @@ grep -q "tenant 1 / organization ca2a7ece-14c6-458c-9266-5c3d96e547f2" "$MIGRATI
 grep -q 'cd469aed-4042-477b-b508-9de39d395056' "$MIGRATION" || fail "fixed workspace mapping missing"
 grep -q "NOTIFY pgrst, 'reload schema'" "$MIGRATION" || fail "PostgREST reload missing"
 pass "packaged migration has provenance, privilege hardening, mapping, and reload"
+
+REPLAY_MIGRATION="volumes/db/daiana-migrations/20260725170000_upgrade_shared_message_quota_replay.sql"
+CANONICAL_REPLAY_MIGRATION="${DAIANA_PYTHON_ROOT:-$ROOT_DIR/../daianapython}/supabase/migrations/20260725170000_upgrade_shared_message_quota_replay.sql"
+EXPECTED_REPLAY="$TMP_DIR/expected-replay.sql"
+EXPECTED_CANONICAL_REPLAY_SHA256="42f6c4e8a18c9b14b15832846b2aa7b305cb7b67126213485e519e0bf603c081"
+EXPECTED_PACKAGED_REPLAY_SHA256="ad89ebdecb3a138be57fcc0535bb73a7569468c7cb518188f4709e1894f1f528"
+
+if [ -f "$CANONICAL_REPLAY_MIGRATION" ]; then
+  [[ "$(daiana_migration_sha256 "$CANONICAL_REPLAY_MIGRATION")" = "$EXPECTED_CANONICAL_REPLAY_SHA256" ]] || fail "canonical replay migration is not the promoted source"
+  awk '
+    NR == 1 {
+      if ($0 != "BEGIN;") invalid = 1
+      next
+    }
+    { line[NR] = $0 }
+    END {
+      if (invalid || line[NR] != "COMMIT;") exit 1
+      for (i = 2; i < NR; i++) print line[i]
+    }
+  ' "$CANONICAL_REPLAY_MIGRATION" > "$EXPECTED_REPLAY" || fail "canonical replay migration wrappers are not the expected standalone statements"
+  printf "%s\n" "NOTIFY pgrst, 'reload schema';" >> "$EXPECTED_REPLAY"
+  cmp -s "$EXPECTED_REPLAY" "$REPLAY_MIGRATION" || fail "packaged replay migration differs from canonical wrapper-free content plus Installer reload"
+fi
+[[ "$(daiana_migration_sha256 "$REPLAY_MIGRATION")" = "$EXPECTED_PACKAGED_REPLAY_SHA256" ]] || fail "packaged replay migration hash is not the canonical wrapper-free adaptation"
+[[ "$(grep -Fxc "NOTIFY pgrst, 'reload schema';" "$REPLAY_MIGRATION")" -eq 1 ]] || fail "packaged replay migration must contain exactly one Installer-owned PostgREST reload"
+if grep -Eiq '^[[:space:]]*(begin([[:space:]]+transaction)?|start[[:space:]]+transaction|commit|rollback|savepoint|release[[:space:]]+savepoint|prepare[[:space:]]+transaction|commit[[:space:]]+prepared|rollback[[:space:]]+prepared)[[:space:]]*;' "$REPLAY_MIGRATION"; then
+  fail "packaged replay migration contains transaction-control statements"
+fi
+[[ "$(tail -c 1 "$REPLAY_MIGRATION" | od -An -t x1 | tr -d '[:space:]')" = 0a ]] || fail "packaged replay migration lacks a trailing newline"
+[[ "$(tail -c 2 "$REPLAY_MIGRATION" | od -An -t x1 | tr -d '[:space:]')" != 0a0a ]] || fail "packaged replay migration has more than one trailing newline"
+pass "packaged replay migration is canonical wrapper-free SQL plus Installer reload"
+
+DAIANA_MIGRATIONS_DIR="$ROOT_DIR/volumes/db/daiana-migrations"
+export DAIANA_MIGRATIONS_DIR
+LOG_OUTPUT=""
+DOCKER_CALLS=0
+run_daiana_migrations 1
+[[ "$DOCKER_CALLS" -eq 0 ]] || fail "packaged migration dry-run contacted Docker"
+[[ "$LOG_OUTPUT" == *'20260717120000_add_shared_message_quota.sql'*'20260725170000_upgrade_shared_message_quota_replay.sql'* ]] || fail "packaged migration order omits or reorders the historical and replay migrations"
+[[ "$LOG_OUTPUT" == *'20260717120000_add_shared_message_quota.sql (version=20260717120000, sha256=a006dd4648b127b2cd2629f1a60364d759c729c9469a2978deb754ae6837c689)'* ]] || fail "dry-run checksum contract omits the historical migration"
+[[ "$LOG_OUTPUT" == *"20260725170000_upgrade_shared_message_quota_replay.sql (version=20260725170000, sha256=$EXPECTED_PACKAGED_REPLAY_SHA256)"* ]] || fail "dry-run checksum contract omits the replay migration"
+run_daiana_migrations
+runner_sql="$(command cat "$CAPTURED_SQL")"
+[[ "$runner_sql" == *'APPLY 20260725170000_upgrade_shared_message_quota_replay.sql'*"NOTIFY pgrst, 'reload schema';"*"INSERT INTO private.daiana_installer_schema_migrations (version, name, checksum, installer_version) VALUES ('20260725170000'"*'COMMIT;'* ]] || fail "replay reload is not before history completion and runner commit"
+pass "packaged migration preserves order, checksums, and transactional reload placement"

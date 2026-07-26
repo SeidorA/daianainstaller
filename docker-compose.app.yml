@@ -129,7 +129,7 @@ services:
          condition: service_healthy
 
   daianastudio:
-    image: cloudseidoranalytics/daianastudio:v3.1.2
+    image: cloudseidoranalytics/daianastudio:v3.1.3
     container_name: daiana-studio
     restart: unless-stopped
     environment:

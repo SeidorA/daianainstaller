@@ -69,8 +69,17 @@ INSERT INTO studio.organization VALUES ('ca2a7ece-14c6-458c-9266-5c3d96e547f2');
 INSERT INTO studio.workspace VALUES ('cd469aed-4042-477b-b508-9de39d395056', 'ca2a7ece-14c6-458c-9266-5c3d96e547f2');
 SQL
 
+  migration_dir="$work_dir/migrations"
+  drift_dir="$work_dir/drift"
+  mkdir -p "$migration_dir" "$drift_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$migration_dir/"
+
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container"
-  export DAIANA_MIGRATIONS_DIR="$ROOT_DIR/volumes/db/daiana-migrations"
+  export DAIANA_MIGRATIONS_DIR="$migration_dir"
+  run_daiana_migrations
+  docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -Atqc \
+    "SELECT public.reserve_tenant_message_quota(1, 'pre-replay', 'integration')->>'status'; SELECT public.release_tenant_message_quota(1, 'pre-replay', 'integration');" >/dev/null
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260725170000_upgrade_shared_message_quota_replay.sql" "$migration_dir/"
   run_daiana_migrations
   run_daiana_migrations
 
@@ -85,7 +94,10 @@ SQL
   [ "$lock_elapsed" -ge 2 ] || die "PostgreSQL $pg_version runner did not wait for the global advisory lock"
 
   result="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
-    SELECT count(*) = 1 FROM private.daiana_installer_schema_migrations;
+    SELECT count(*) = 2 FROM private.daiana_installer_schema_migrations;
+    SELECT checksum = 'a006dd4648b127b2cd2629f1a60364d759c729c9469a2978deb754ae6837c689' FROM private.daiana_installer_schema_migrations WHERE version = '20260717120000';
+    SELECT checksum = 'ad89ebdecb3a138be57fcc0535bb73a7569468c7cb518188f4709e1894f1f528' FROM private.daiana_installer_schema_migrations WHERE version = '20260725170000';
+    SELECT result->>'legacy' = 'true' FROM public.tenant_message_quota_reservations WHERE \"requestId\" = 'pre-replay' AND source = 'integration';
     SELECT public.resolve_daiana_tenant_from_studio('ca2a7ece-14c6-458c-9266-5c3d96e547f2', 'cd469aed-4042-477b-b508-9de39d395056') = 1;
     SELECT NOT has_table_privilege('anon', 'public.tenant_message_quota_periods', 'SELECT');
     SELECT NOT has_table_privilege('service_role', 'public.tenant_message_quota_periods', 'INSERT');
@@ -96,7 +108,7 @@ SQL
     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)', 'EXECUTE');
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;
     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
-  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 11 ] || die "PostgreSQL $pg_version object/RPC/privilege checks failed: $result"
+  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 14 ] || die "PostgreSQL $pg_version historical/replay/checksum/object/RPC/privilege checks failed: $result"
 
   docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -196,16 +208,16 @@ SQL
   fi
   [[ "$conflict_error" == *'Conflicting fixed Studio organization mapping'* ]] || die "PostgreSQL $pg_version mapping conflict failure was unclear"
 
-  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$work_dir/20260717120000_add_shared_message_quota.sql"
-  printf '\n-- checksum drift test\n' >> "$work_dir/20260717120000_add_shared_message_quota.sql"
-  DAIANA_MIGRATIONS_DIR="$work_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  printf '\n-- checksum drift test\n' >> "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  DAIANA_MIGRATIONS_DIR="$drift_dir"
   export DAIANA_MIGRATIONS_DIR
   if run_daiana_migrations; then die "PostgreSQL $pg_version checksum drift was accepted"; fi
   count="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc 'SELECT count(*) FROM private.daiana_installer_schema_migrations;')"
-  [ "$count" = 1 ] || die "PostgreSQL $pg_version drift changed history"
+  [ "$count" = 2 ] || die "PostgreSQL $pg_version drift changed history"
 
-  rm -f "$work_dir/20260717120000_add_shared_message_quota.sql"
-  printf 'CREATE TABLE public.must_rollback(id integer);\nSELECT 1/0;\n' > "$work_dir/20260717130000_failure.sql"
+  rm -f "$drift_dir/20260717120000_add_shared_message_quota.sql"
+  printf 'CREATE TABLE public.must_rollback(id integer);\nSELECT 1/0;\n' > "$drift_dir/20260717130000_failure.sql"
   if run_daiana_migrations; then die "PostgreSQL $pg_version failing migration succeeded"; fi
   recorded="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT count(*) FROM private.daiana_installer_schema_migrations WHERE version = '20260717130000';")"
   table_exists="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT to_regclass('public.must_rollback') IS NOT NULL;")"
