@@ -3,6 +3,7 @@ set -euo pipefail
 
 log() { printf '===> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+precondition_failure() { printf 'PRECONDITION_FAILURE: %s\n' "$*" >&2; exit 2; }
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$BASE_DIR"
@@ -26,8 +27,7 @@ load_dotenv() {
         elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
           value="${value:1:${#value}-2}"
         fi
-        printf -v "$key" '%s' "$value"
-        export "$key"
+        export "$key=$value"
         ;;
     esac
   done < "$file"
@@ -40,10 +40,6 @@ NPM_ADMIN_EMAIL="${NPM_ADMIN_EMAIL:-}"
 NPM_ADMIN_PASS="${NPM_ADMIN_PASS:-}"
 NPM_API_URL="${NPM_API_URL:-http://127.0.0.1:81}"
 CERT_NAME="${NPM_LOCAL_CERT_NAME:-daiana-local-tls}"
-CERT_PROVIDER="${NPM_LOCAL_CERT_PROVIDER:-other}"
-CERT_FILE="${NPM_LOCAL_CERT_FILE:-volumes/api/server.crt}"
-KEY_FILE="${NPM_LOCAL_KEY_FILE:-volumes/api/server.key}"
-
 [ -n "$BASE_DOMAIN" ] || die "BASE_DOMAIN is required"
 [ -n "$NPM_ADMIN_EMAIL" ] || die "NPM_ADMIN_EMAIL is required"
 [ -n "$NPM_ADMIN_PASS" ] || die "NPM_ADMIN_PASS is required"
@@ -58,8 +54,11 @@ api() {
   local response status body
   local args=( -sS -X "$method" "$NPM_API_URL$path" -H 'Content-Type: application/json' )
   [ -n "${TOKEN:-}" ] && args+=( -H "Authorization: Bearer $TOKEN" )
-  [ -n "$data" ] && args+=( -d "$data" )
-  response="$(curl "${args[@]}" -w '\n%{http_code}' || true)"
+  if [ -n "$data" ]; then
+    response="$(printf '%s' "$data" | curl "${args[@]}" --data-binary @- -w '\n%{http_code}' || true)"
+  else
+    response="$(curl "${args[@]}" -w '\n%{http_code}' || true)"
+  fi
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
   if [[ "$status" != 2* ]]; then
@@ -71,7 +70,7 @@ api() {
 
 login() {
   local payload
-  payload="$(jq -n --arg identity "$NPM_ADMIN_EMAIL" --arg secret "$NPM_ADMIN_PASS" '{identity:$identity, secret:$secret}')"
+  payload="$(NPM_ADMIN_PASS="$NPM_ADMIN_PASS" jq -n --arg identity "$NPM_ADMIN_EMAIL" '{identity:$identity, secret:env.NPM_ADMIN_PASS}')"
   api POST /api/tokens "$payload" | jq -r '.token // empty'
 }
 
@@ -136,7 +135,7 @@ check_proxy_host() {
   ssl_forced="$(jq -r '.ssl_forced // false' <<<"$info")"
 
   [ -n "$cert_id" ] || die "Proxy host $domain has no certificate assigned"
-  [ "$ssl_forced" = "true" ] || die "Proxy host $domain does not force SSL"
+  [ "$ssl_forced" = "true" ] || precondition_failure "NPM proxy host $domain reports ssl_forced=$ssl_forced; restore the managed certificate/TLS state with bash apply-certs.sh, then rerun this smoke test"
 
   log "OK: $domain (cert_id=$cert_id, ssl_forced=$ssl_forced)"
 }

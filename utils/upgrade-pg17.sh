@@ -128,10 +128,17 @@ confirm() {
 
 run_sql_on() {
     local container=$1; shift
-    docker exec -i \
-        -e PGPASSWORD="$pg_password" \
-        "$container" \
-        psql -h localhost -U supabase_admin -d postgres -v ON_ERROR_STOP=1 "$@"
+    local xtrace_was_enabled=0 sql_status=0
+    case "$-" in
+        *x*) xtrace_was_enabled=1; set +x ;;
+    esac
+    { printf '%s\n' "$pg_password"; } | docker exec -i "$container" \
+        bash -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' bash \
+        -h localhost -U supabase_admin -d postgres -v ON_ERROR_STOP=1 "$@" || sql_status=$?
+    if (( xtrace_was_enabled )); then
+        set -x
+    fi
+    return "$sql_status"
 }
 
 wait_for_healthy() {
@@ -166,8 +173,11 @@ preflight() {
         | grep -E '^db-config$|_db-config$' | head -n 1)
     [ -n "$db_config_vol" ] || die "Could not find db-config volume. Is Supabase running?"
 
+    password_xtrace_was_enabled=0
+    case "$-" in *x*) password_xtrace_was_enabled=1; set +x ;; esac
     pg_password=$(grep '^POSTGRES_PASSWORD=' .env | cut -d '=' -f 2- | sed "s/^['\"]//;s/['\"]$//" | head -n 1)
     [ -n "$pg_password" ] || die "POSTGRES_PASSWORD not set in .env."
+    if (( password_xtrace_was_enabled )); then set -x; fi
 
     docker inspect "$DB_CONTAINER" >/dev/null 2>&1 \
         || die "Container '$DB_CONTAINER' not found. Is Supabase running?"
@@ -443,7 +453,6 @@ run_upgrade() {
         -v "${abs_migration_dir}:/mnt/host-migration" \
         -v "${db_config_vol}:/etc/postgresql-custom" \
         -v "${staging_dir}:/tmp/staging:ro" \
-        -e PGPASSWORD="$pg_password" \
         "$current_image" \
         infinity
 
@@ -487,7 +496,6 @@ run_upgrade() {
     if ! docker exec \
         -e IS_CI=true \
         -e PG_MAJOR_VERSION=17 \
-        -e PGPASSWORD="$pg_password" \
         -e LD_LIBRARY_PATH=/tmp/pg_upgrade_bin/17/lib \
         -e NIX_PGLIBDIR=/tmp/pg_upgrade_bin/17/lib \
         "$UPGRADE_CONTAINER" \
@@ -523,7 +531,6 @@ run_complete() {
         -v "${abs_migration_dir}:/mnt/host-migration" \
         -v "${db_config_vol}:/etc/postgresql-custom" \
         -v "${staging_dir}:/tmp/staging:ro" \
-        -e PGPASSWORD="$pg_password" \
         "$PG17_UPGRADE_IMAGE" \
         infinity
 
@@ -563,7 +570,6 @@ run_complete() {
     docker exec \
         -e IS_CI=true \
         -e PG_MAJOR_VERSION=17 \
-        -e PGPASSWORD="$pg_password" \
         "$COMPLETE_CONTAINER" \
         /tmp/upgrade/complete.sh || true
 
@@ -675,8 +681,7 @@ apply_role_migrations() {
     # image may use glibc 2.40). Do this before any other SQL to suppress
     # the noisy warnings on every subsequent command.
     for db in postgres template1 _supabase; do
-        docker exec -i -e PGPASSWORD="$pg_password" "$DB_CONTAINER" \
-            psql -h localhost -U supabase_admin -d "$db" \
+        run_sql_on "$DB_CONTAINER" -h localhost -U supabase_admin -d "$db" \
             -c "ALTER DATABASE \"$db\" REFRESH COLLATION VERSION;" || true
     done
 
@@ -709,11 +714,8 @@ apply_role_migrations() {
 
     for m in $migrations; do
         echo "  Running: $m"
-        docker exec -i \
-            -e PGPASSWORD="$pg_password" \
-            "$DB_CONTAINER" \
-            psql -h localhost -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
-                -f "${migration_dir}/${m}" || warn "  $m failed (non-fatal)"
+        run_sql_on "$DB_CONTAINER" -h localhost -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+            -f "${migration_dir}/${m}" || warn "  $m failed (non-fatal)"
     done
 
     # Reconcile extension versions to the target image. pg_upgrade generates

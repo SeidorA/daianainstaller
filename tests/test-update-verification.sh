@@ -12,10 +12,16 @@ log() { LOG_OUTPUT="${LOG_OUTPUT}${*}\n"; }
 # shellcheck source=utils/update-verification.sh
 source "$ROOT_DIR/utils/update-verification.sh"
 
+# These fixtures are consumed by the sourced verifier.
+# shellcheck disable=SC2034
 SITE_URL="https://next.example.test"
+# shellcheck disable=SC2034
 BACKEND_BASE_URL="https://python.example.test"
+# shellcheck disable=SC2034
 STUDIO_BASE_URL="https://studio.example.test"
+# shellcheck disable=SC2034
 DAIANA_POST_DEPLOY_MAX_TRIES=3
+# shellcheck disable=SC2034
 DAIANA_POST_DEPLOY_RETRY_DELAY=0
 WAIT_CALLS=""
 FAIL_LABEL=""
@@ -29,6 +35,7 @@ wait_for_http() {
 snapshot="$TMP_DIR/20260726-181500"
 mkdir -p "$snapshot"
 printf '%s\n' '{"id":"20260726-181500","type":"image-orchestration-rollback"}' > "$snapshot/metadata.json"
+# shellcheck disable=SC2034
 LAST_UPDATE_SNAPSHOT_DIR="$snapshot"
 
 verify_update_services || fail "healthy services were rejected"
@@ -55,7 +62,7 @@ jq -e \
   "$snapshot/metadata.json" >/dev/null || fail "recovery metadata is incomplete"
 pass "timeout fails closed with persisted non-automatic recovery guidance"
 
-submit_line="$(grep -n '^portainer_upsert_stack .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+submit_line="$(grep -n '^portainer_upsert_stack_from_vars .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 verify_line="$(grep -n '^  verify_update_services' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 success_line="$(grep -n '^Update complete\.$' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 [[ -n "$submit_line" && -n "$verify_line" && -n "$success_line" ]] || fail "could not locate update verification lifecycle"
