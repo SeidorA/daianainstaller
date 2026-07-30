@@ -23,12 +23,14 @@ export POSTGRES_DB=postgres
 export DAIANA_MIGRATIONS_DIR="$TMP_DIR/migrations"
 CAPTURED_SQL="$TMP_DIR/captured.sql"
 DOCKER_RESULT=0
+DOCKER_ERROR=""
 DOCKER_CALLS=0
 LOG_OUTPUT=""
 
 docker_cmd() {
   DOCKER_CALLS=$((DOCKER_CALLS + 1))
   command cat > "$CAPTURED_SQL"
+  [[ -z "$DOCKER_ERROR" ]] || printf '%s\n' "$DOCKER_ERROR" >&2
   return "$DOCKER_RESULT"
 }
 
@@ -36,6 +38,7 @@ docker_cmd() {
 source "$ROOT_DIR/utils/daiana-migrations.sh"
 
 run_daiana_migrations || fail "runner should emit a psql transaction"
+[[ "${DAIANA_MIGRATION_OUTCOME:-}" == committed && "${DAIANA_MIGRATION_STATUS:-}" == 0 ]] || fail "successful commit outcome/status was not propagated"
 sql="$(command cat "$CAPTURED_SQL")"
 [[ "$sql" == *'BEGIN;'* ]] || fail "transaction begin missing"
 [[ "$sql" == *'COMMIT;'* ]] || fail "transaction commit missing"
@@ -49,12 +52,30 @@ first_prefix="${sql%%CREATE TABLE public.first_migration*}"
 pass "runner emits ordered lock/checksum/transaction contract"
 
 DOCKER_RESULT=17
+DOCKER_ERROR='ERROR: syntax error at or near "CREATE"'
 LOG_OUTPUT=""
 if run_daiana_migrations; then
   fail "runner should propagate psql failure"
 fi
-[[ "$LOG_OUTPUT" == *'rolled back migration and history changes'* ]] || fail "failure log does not explain rollback"
+[[ "$LOG_OUTPUT" == *'failed before the commit boundary'* ]] || fail "failure log does not explain the pre-commit boundary"
+[[ "${DAIANA_MIGRATION_OUTCOME:-}" == failed && "${DAIANA_MIGRATION_STATUS:-}" == 17 ]] || fail "known SQL failure was not classified as failed"
 pass "runner fails closed when psql fails"
+
+DOCKER_RESULT=23
+DOCKER_ERROR=""
+if run_daiana_migrations; then
+  fail "arbitrary nonzero runner result should fail"
+fi
+[[ "${DAIANA_MIGRATION_OUTCOME:-}" == unknown && "${DAIANA_MIGRATION_STATUS:-}" == 23 ]] || fail "arbitrary nonzero result was falsely classified as SQL failure"
+pass "arbitrary nonzero result remains unknown and retry-blocking"
+
+DOCKER_RESULT=125
+DOCKER_ERROR='connection reset by peer'
+if run_daiana_migrations; then
+  fail "transport loss should fail"
+fi
+[[ "${DAIANA_MIGRATION_OUTCOME:-}" == unknown && "${DAIANA_MIGRATION_STATUS:-}" == 125 ]] || fail "transport loss was not classified as unknown"
+pass "transport loss remains unknown and requires reconciliation"
 
 FAIL_STOP_MARKER="$TMP_DIR/app-deploy-called"
 if POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_MIGRATIONS_DIR="$TMP_DIR/migrations" \

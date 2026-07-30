@@ -1,0 +1,25 @@
+# Registry-free candidate overlay. This file is consumed only by
+# utils/private-chat-harness.sh and never by install-daiana.sh/update-daiana.sh.
+# The development values below are ONLY for the HTTP local E2E route. They must
+# not be copied into the production/base Compose files.
+name: daiana-app
+
+services:
+  daiananext:
+    image: ${DAIANA_CANDIDATE_NEXT_IMAGE:?DAIANA_CANDIDATE_NEXT_IMAGE is required}
+    pull_policy: never
+    environment:
+      NODE_ENV: development
+      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}
+      PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN: "true"
+  daianapython:
+    image: ${DAIANA_CANDIDATE_PYTHON_IMAGE:?DAIANA_CANDIDATE_PYTHON_IMAGE is required}
+    pull_policy: never
+    environment:
+      NODE_ENV: development
+      PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN: "true"
+
+networks:
+  default:
+    name: daiana-mgmt
+    external: true

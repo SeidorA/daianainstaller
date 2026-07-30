@@ -32,9 +32,11 @@ daiana_migration_metadata() {
 run_daiana_migrations() {
   local dry_run="${1:-0}"
   local installer_version migration_sql file metadata version name checksum base rc
-  local migration_count=0
+  local migration_count=0 output_file outcome_file result_file_owned=0
   local LC_ALL=C
   export LC_ALL
+  DAIANA_MIGRATION_OUTCOME=unknown
+  export DAIANA_MIGRATION_OUTCOME
 
   [ -d "$DAIANA_MIGRATIONS_DIR" ] || die "Daiana migrations directory is missing: $DAIANA_MIGRATIONS_DIR"
   installer_version="$(tr -d '[:space:]' < VERSION)"
@@ -54,10 +56,22 @@ run_daiana_migrations() {
     return 0
   fi
 
+  password_validation_xtrace_was_enabled=0
+  case "$-" in *x*) password_validation_xtrace_was_enabled=1; set +x ;; esac
   [ -n "${POSTGRES_PASSWORD:-}" ] || die "POSTGRES_PASSWORD is required to run Daiana migrations"
+  if (( password_validation_xtrace_was_enabled )); then set -x; fi
   [ -n "${POSTGRES_DB:-}" ] || die "POSTGRES_DB is required to run Daiana migrations"
   command -v docker >/dev/null 2>&1 || die "docker is required to run Daiana migrations"
+  if [ -n "${DAIANA_MIGRATION_RESULT_FILE:-}" ]; then
+    outcome_file="$DAIANA_MIGRATION_RESULT_FILE"
+  else
+    outcome_file="$(mktemp "${TMPDIR:-/tmp}/daiana-migrations-outcome.XXXXXX")"
+    result_file_owned=1
+  fi
+  printf 'outcome=unknown\nstatus=125\n' > "$outcome_file"
+  if (
   migration_sql="$(mktemp "${TMPDIR:-/tmp}/daiana-migrations.XXXXXX")"
+  trap 'rm -f "$migration_sql"' EXIT
   {
     printf '%s\n' '\set ON_ERROR_STOP on'
     printf '%s\n' 'BEGIN;'
@@ -102,20 +116,71 @@ run_daiana_migrations() {
   } > "$migration_sql"
 
   if [ "$migration_count" -eq 0 ]; then
-    rm -f "$migration_sql"
     die "No Daiana migration files found in $DAIANA_MIGRATIONS_DIR"
   fi
 
   log "Running $migration_count ordered Daiana migration file(s) as postgres"
-  if docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$DAIANA_DB_CONTAINER" \
-      psql -X -h 127.0.0.1 -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /dev/stdin < "$migration_sql"; then
-    rm -f "$migration_sql"
+  # The first line on stdin is consumed by the container-local shell and used
+  # to create the libpq password environment. The migration SQL follows on the
+  # same pipe, so the password never appears in docker's argv or process list.
+  migration_xtrace_was_enabled=0
+  case "$-" in
+    *x*) migration_xtrace_was_enabled=1; set +x ;;
+  esac
+  output_file="$(mktemp "${TMPDIR:-/tmp}/daiana-migrations-output.XXXXXX")"
+  if { printf '%s\n' "$POSTGRES_PASSWORD"; cat "$migration_sql"; } | \
+      docker_cmd exec -i "$DAIANA_DB_CONTAINER" \
+      sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' sh \
+      -X -h 127.0.0.1 -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /dev/stdin >"$output_file" 2>&1; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if (( migration_xtrace_was_enabled )); then
+    set -x
+  fi
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$output_file" "$migration_sql"
+    printf 'outcome=committed\nstatus=0\n' > "$outcome_file"
+    exit 0
+  else
+    # A Docker client/transport failure, or a session killed while PostgreSQL
+    # was consuming the transaction, does not prove rollback.  Keep the
+    # distinction in-process so callers can leave a pending/manual marker.
+    if grep -Eiq 'ERROR:|syntax error|checksum drift|permission denied|relation .* does not exist|duplicate key|violates|must be owner|invalid .* (value|input)' "$output_file"; then
+      DAIANA_MIGRATION_OUTCOME=failed
+    else
+      # A non-zero client status without a positively identified SQL error is
+      # ambiguous: the transaction may have committed before the session was
+      # lost.  Callers must reconcile the live ledger instead of claiming a
+      # rollback.
+      DAIANA_MIGRATION_OUTCOME=unknown
+    fi
+    printf 'outcome=%s\nstatus=%s\n' "$DAIANA_MIGRATION_OUTCOME" "$rc" > "$outcome_file"
+    rm -f "$output_file" "$migration_sql"
+    exit "$rc"
+  fi
+  ); then
+    DAIANA_MIGRATION_OUTCOME=committed
+    DAIANA_MIGRATION_STATUS=0
+    export DAIANA_MIGRATION_STATUS
     log "Daiana migrations completed"
+    [ "$result_file_owned" -eq 1 ] && rm -f "$outcome_file"
     return 0
   else
     rc=$?
-    rm -f "$migration_sql"
-    log "Daiana migrations failed; PostgreSQL rolled back migration and history changes"
+    DAIANA_MIGRATION_OUTCOME="$(awk -F= '$1 == "outcome" { print $2; exit }' "$outcome_file" 2>/dev/null || printf unknown)"
+    DAIANA_MIGRATION_OUTCOME="${DAIANA_MIGRATION_OUTCOME:-unknown}"
+    DAIANA_MIGRATION_STATUS="$(awk -F= '$1 == "status" { print $2; exit }' "$outcome_file" 2>/dev/null || printf '%s' "$rc")"
+    DAIANA_MIGRATION_STATUS="${DAIANA_MIGRATION_STATUS:-$rc}"
+    export DAIANA_MIGRATION_STATUS
+    export DAIANA_MIGRATION_OUTCOME
+    if [ "${DAIANA_MIGRATION_OUTCOME:-unknown}" = unknown ]; then
+      log "Daiana migrations returned an unknown database outcome; manual reconciliation is required"
+    else
+      log "Daiana migrations failed before the commit boundary"
+    fi
+    [ "$result_file_owned" -eq 1 ] && rm -f "$outcome_file"
     return "$rc"
   fi
 }

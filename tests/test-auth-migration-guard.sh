@@ -65,7 +65,7 @@ docker_cmd() {
 
 # Load only the migration guard helpers from the installer. Sourcing the whole
 # installer would execute the install workflow.
-awk '/^psql_scalar\(\)/,/^run_psql_file\(\)/ { if ($0 !~ /^run_psql_file\(\)/) print }' "$ROOT_DIR/install-daiana.sh" >"$TMP_DIR/auth-guard.sh"
+awk '/^psql_with_password\(\)/,/^run_psql_file\(\)/ { if ($0 !~ /^run_psql_file\(\)/) print }' "$ROOT_DIR/install-daiana.sh" >"$TMP_DIR/auth-guard.sh"
 # shellcheck source=/dev/null
 source "$TMP_DIR/auth-guard.sh"
 
