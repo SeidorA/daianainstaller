@@ -40,6 +40,7 @@ See [docs/README.md](docs/README.md) for the full lifecycle guide.
 | Nginx Proxy Manager | Public DNS/proxy host creation and certificate workflow |
 | Updates | Selectable Daiana image versions, optional independently versioned images, and rollback snapshots |
 | Database migrations | Forward-only ordered Daiana migrations with advisory locking and checksum history |
+| Local candidate harness | Registry-free authenticated private-chat candidate activation for arm64 |
 | Versioning | `VERSION`, `CHANGELOG.md`, `versions.md`, and Git tags |
 
 Each Portainer stack receives only the environment variables referenced by its compose file(s).
@@ -100,6 +101,7 @@ For details, see [docs/update.md](docs/update.md).
 | [docs/update.md](docs/update.md) | Updates, selectable versions, rollback, and repo sync guard |
 | [docs/uninstall.md](docs/uninstall.md) | Cleanup and purge behavior |
 | [docs/daiana-lifecycle.md](docs/daiana-lifecycle.md) | Lifecycle overview |
+| [docs/private-chat-harness.md](docs/private-chat-harness.md) | Safe local authenticated private-chat candidate workflow, migration and cleanup contracts |
 | [CONFIG.md](CONFIG.md) | Supabase environment variable reference |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 | [versions.md](versions.md) | Docker image version history |

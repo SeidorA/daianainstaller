@@ -10,11 +10,22 @@
 *.old
 
 # Generated runtime data
+.private-chat-harness/
+.private-chat-harness/*.receipt
+.private-chat-harness/failure-diagnostics.txt
+.private-chat-harness/manual-cleanup-required
+.private-chat-harness/active
 volumes/db/data/
 volumes/storage/stub/
 volumes/daiana/
 volumes/portainer/
 volumes/api/*.crt
 volumes/api/*.key
+# Runtime receipts and diagnostics are retained locally as rollback evidence;
+# never stage historical runtime artifacts from this tracked project path.
+volumes/api/*receipt*
+volumes/api/*diagnostic*
+volumes/api/*state*
+volumes/api/*marker*
 volumes/snippets/*.sql
 context.md
