@@ -101,7 +101,7 @@ services:
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
-      DAIANA_URL: ${BACKEND_BASE_URL}
+       API_DAIANA_URL: ${BACKEND_BASE_URL}
     # command: /bin/sh -c "gunicorn --bind 0.0.0.0:3978 --worker-class aiohttp.worker.GunicornWebWorker --timeout 600 app:app"
     tty: true
     depends_on:
