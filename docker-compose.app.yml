@@ -10,6 +10,7 @@ services:
       NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      PRIVATE_CHAT_PYTHON_ORIGIN: ${BACKEND_BASE_URL}
       WEBUI_PUBLIC_URL: ${WEBUI_BASE_URL}
       WEBUI_AUTH_HANDOFF_SECRET: ${WEBUI_AUTH_HANDOFF_SECRET:-}
     depends_on:
@@ -101,7 +102,7 @@ services:
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
-       API_DAIANA_URL: ${BACKEND_BASE_URL}
+      API_DAIANA_URL: ${BACKEND_BASE_URL}
     # command: /bin/sh -c "gunicorn --bind 0.0.0.0:3978 --worker-class aiohttp.worker.GunicornWebWorker --timeout 600 app:app"
     tty: true
     depends_on:
