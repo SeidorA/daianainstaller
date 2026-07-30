@@ -133,7 +133,7 @@ prepull_deployment_bundle_images || fail "complete pre-pull failed"
 pass "all three pulls are required before the Portainer boundary"
 pull_line="$(grep -n '  prepull_deployment_bundle_images$' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 start_line="$(grep -n 'Complete deployment bundle replacement start' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
-submit_line="$(grep -n '^portainer_upsert_stack .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
+submit_line="$(grep -n 'portainer_upsert_stack_from_vars .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 finish_line="$(grep -n 'Complete deployment bundle replacement finish' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 [[ "$pull_line" -lt "$start_line" && "$start_line" -lt "$submit_line" && "$submit_line" -lt "$finish_line" ]] \
   || fail "bundle start/finish do not bracket only the Portainer update"
@@ -162,14 +162,21 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
     grep -Fxq "$reference" <<<"$images" || fail "final stack omitted exact ref: $reference"
   done
-  awk '/^portainer_submit_stack_file\(\)/,/^}/' "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/portainer-submit.sh"
+  awk '/^portainer_temp_cleanup\(\)/,/^ensure_network\(\)/ { if ($0 !~ /^ensure_network\(\)/) print }' \
+    "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/portainer-submit.sh"
   # shellcheck source=/dev/null
   source "$TMP_DIR/portainer-submit.sh"
   log() { :; }
   portainer_stack_id() { printf '7'; }
-  portainer_request_json() { CAPTURED_PAYLOAD="$3"; }
+  CAPTURE_FILE="$TMP_DIR/captured.json"
+  portainer_request_json_file() { cp "$3" "$CAPTURE_FILE"; }
   CAPTURED_PAYLOAD=""
-  PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app '[]' '[2]' "$final_stack"
+  env_file="$TMP_DIR/env.json"
+  registry_file="$TMP_DIR/registries.json"
+  printf '%s' '[]' > "$env_file"
+  printf '%s' '[2]' > "$registry_file"
+  PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app "$env_file" "$registry_file" "$final_stack"
+  CAPTURED_PAYLOAD="$(<"$CAPTURE_FILE")"
   jq -jr '.StackFileContent' <<<"$CAPTURED_PAYLOAD" > "$TMP_DIR/submitted-stack.yml"
   cmp -s "$final_stack" "$TMP_DIR/submitted-stack.yml" || fail "Portainer payload changed stack bytes"
   for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
@@ -177,8 +184,9 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   done
   cp "$final_stack" "$TMP_DIR/docker-compose.before.yml"
   CAPTURED_PAYLOAD=""
-  DAIANA_NEXT_IMAGE=hostile DAIANA_PYTHON_IMAGE=hostile DAIANA_STUDIO_IMAGE=hostile \
-    PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app "$saved_env" '[2]' "$TMP_DIR/docker-compose.before.yml"
+  printf '%s' "$saved_env" > "$env_file"
+  PORTAINER_ENDPOINT_ID=1 portainer_submit_stack_file daiana-app "$env_file" "$registry_file" "$TMP_DIR/docker-compose.before.yml"
+  CAPTURED_PAYLOAD="$(<"$CAPTURE_FILE")"
   jq -jr '.StackFileContent' <<<"$CAPTURED_PAYLOAD" > "$TMP_DIR/rollback-submitted.yml"
   cmp -s "$TMP_DIR/docker-compose.before.yml" "$TMP_DIR/rollback-submitted.yml" || fail "rollback re-rendered stored stack"
   jq -e --argjson saved "$saved_env" '.Env == $saved' <<<"$CAPTURED_PAYLOAD" >/dev/null \
