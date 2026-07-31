@@ -891,7 +891,7 @@ validate_candidate_source_refs() {
   approved_python_sha="${DAIANA_APPROVED_PYTHON_SOURCE_SHA:-}"
   approved_msteams_sha="${DAIANA_APPROVED_MSTEAMS_SOURCE_SHA:-}"
   approved_studio_sha="${DAIANA_APPROVED_STUDIO_SOURCE_SHA:-}"
-  if [[ "$next_sha" == 90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+  if [[ "$next_sha" == cd910e8a22c43947cf5f726ec7e8ef85da157e57 \
      && "$python_sha" == 3ebc16d029b06efd2a0cd6b02980c45324948150 \
      && "$msteams_sha" == c31a2262eb5720707861ac79a8d4cd55311c730e \
      && "$studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]]; then
@@ -900,7 +900,7 @@ validate_candidate_source_refs() {
       && "$approved_python_sha" =~ ^[a-f0-9]{40}$ \
       && "$approved_msteams_sha" =~ ^[a-f0-9]{40}$ \
       && "$approved_studio_sha" =~ ^[a-f0-9]{40}$ ]] || die "all four services require explicit full-SHA allowlist inputs"
-    [[ "$approved_next_sha" == 90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+    [[ "$approved_next_sha" == cd910e8a22c43947cf5f726ec7e8ef85da157e57 \
       && "$approved_python_sha" == 3ebc16d029b06efd2a0cd6b02980c45324948150 \
       && "$approved_msteams_sha" == c31a2262eb5720707861ac79a8d4cd55311c730e \
       && "$approved_studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]] || die "caller-supplied source SHA allowlist is not approved"
