@@ -27,7 +27,7 @@ next_image='cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd
 python_image='cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150'
 msteams_image="cloudseidoranalytics/daianamsteams:sha-$(git -C "$TMP_DIR/msteams" rev-parse develop)"
 studio_image="cloudseidoranalytics/daianastudio:sha-$(git -C "$TMP_DIR/studio" rev-parse develop)"
-python_origin='http://127.0.0.1:5002'
+python_origin='http://api.192.168.0.19.nip.io'
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
@@ -260,7 +260,14 @@ elif mutation == "wrong_network": network_name = "wrong-network"
 elif mutation == "wrong_image": services["daiananext"]["image"] = "cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 elif mutation == "wrong_pull_policy": services["daianapython"]["pull_policy"] = "always"
 elif mutation == "origin_public_http": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://example.com"
+elif mutation == "origin_public_nip_http": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.8.8.8.8.nip.io"
 elif mutation == "origin_path": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://127.0.0.1:5002/path"
+elif mutation == "origin_query": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19.nip.io?x=1"
+elif mutation == "origin_fragment": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19.nip.io#fragment"
+elif mutation == "origin_credentials": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://user@api.192.168.0.19.nip.io"
+elif mutation == "origin_whitespace": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19 .nip.io"
+elif mutation == "origin_malformed_host": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api..192.168.0.19.nip.io"
+elif mutation == "origin_wrong_service_placement": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://192.168.0.19.api.nip.io"
 elif mutation == "origin_python_service":
     services["daianapython"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"]
 elif mutation in {"malicious_yaml_tag", "invalid_yaml"}: services["daiananext"]["invalid"] = True
@@ -578,8 +585,15 @@ mutations = {
      "wrong_network": ("    name: daiana-mgmt\n", "    name: wrong-network\n", 1),
      "wrong_image": ("    image: ${DAIANA_CANDIDATE_NEXT_IMAGE:?DAIANA_CANDIDATE_NEXT_IMAGE is required}\n", "    image: cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", 1),
       "wrong_pull_policy": ("    pull_policy: never\n", "    pull_policy: always\n", 1),
-      "origin_public_http": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://example.com\n", 1),
-      "origin_path": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://127.0.0.1:5002/path\n", 1),
+       "origin_public_http": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://example.com\n", 1),
+       "origin_public_nip_http": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api.8.8.8.8.nip.io\n", 1),
+       "origin_path": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://127.0.0.1:5002/path\n", 1),
+       "origin_query": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api.192.168.0.19.nip.io?x=1\n", 1),
+       "origin_fragment": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: 'http://api.192.168.0.19.nip.io#fragment'\n", 1),
+       "origin_credentials": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://user@api.192.168.0.19.nip.io\n", 1),
+       "origin_whitespace": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: 'http://api.192.168.0.19 .nip.io'\n", 1),
+       "origin_malformed_host": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api..192.168.0.19.nip.io\n", 1),
+       "origin_wrong_service_placement": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://192.168.0.19.api.nip.io\n", 1),
       "origin_python_service": ("  daianapython:\n    image: ${DAIANA_CANDIDATE_PYTHON_IMAGE:?DAIANA_CANDIDATE_PYTHON_IMAGE is required}\n    pull_policy: never\n", "  daianapython:\n    image: ${DAIANA_CANDIDATE_PYTHON_IMAGE:?DAIANA_CANDIDATE_PYTHON_IMAGE is required}\n    pull_policy: never\n    environment:\n      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", 1),
      "malicious_yaml_tag": ("services:\n", "services:\n  !!python/object/apply:os.system [\"echo pwned\"]\n", 1),
      "invalid_yaml": ("services:\n", "services:\n  invalid_yaml_marker: [\n", 1),
@@ -609,7 +623,7 @@ PY
 
  for overlay_mutation in \
    ports volumes command entrypoint depends_on extra_environment third_service extra_network \
-    wrong_top_level_key wrong_network wrong_image wrong_pull_policy origin_public_http origin_path origin_python_service malicious_yaml_tag invalid_yaml; do
+    wrong_top_level_key wrong_network wrong_image wrong_pull_policy origin_public_http origin_public_nip_http origin_path origin_query origin_fragment origin_credentials origin_whitespace origin_malformed_host origin_wrong_service_placement origin_python_service malicious_yaml_tag invalid_yaml; do
   run_overlay_rejection "$overlay_mutation"
 done
 

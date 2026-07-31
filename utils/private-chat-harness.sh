@@ -579,10 +579,10 @@ def valid_origin(value):
         try:
             return ip_address(host).is_loopback
         except ValueError:
-            suffix = ".nip.io"
-            if not host.lower().endswith(suffix):
+            match = re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*(\d{1,3}(?:\.\d{1,3}){3})\.nip\.io", host, re.IGNORECASE)
+            if not match:
                 return False
-            address = ip_address(host[:-len(suffix)])
+            address = ip_address(match.group(1))
             return address.is_private or address.is_loopback
     except ValueError:
         return False
@@ -677,10 +677,10 @@ def valid_origin(value):
         try:
             return ip_address(host).is_loopback
         except ValueError:
-            suffix = ".nip.io"
-            if not host.lower().endswith(suffix):
+            match = re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*(\d{1,3}(?:\.\d{1,3}){3})\.nip\.io", host, re.IGNORECASE)
+            if not match:
                 return False
-            address = ip_address(host[:-len(suffix)])
+            address = ip_address(match.group(1))
             return address.is_private or address.is_loopback
     except ValueError:
         return False

@@ -41,7 +41,8 @@ The current HTTP nip.io route requires `NODE_ENV=development` together with
 both values on **both** `daiananext` and `daianapython`, and requires the
 non-empty `PRIVATE_CHAT_PYTHON_ORIGIN` only on `daiananext`. That origin must be
 an origin-only HTTP/HTTPS URL: HTTP is limited to localhost, loopback, or
-private/loopback `nip.io` hosts; HTTPS follows the existing Front proxy policy.
+private/loopback `nip.io` hosts, including optional DNS service labels such as
+`api.192.168.0.19.nip.io`; HTTPS follows the existing Front proxy policy.
 Credentials, paths, queries, and fragments are rejected. This is intentionally
 development-only configuration for the local HTTP E2E path and is not present
 in the production/base Compose files. Preflight renders the complete candidate
