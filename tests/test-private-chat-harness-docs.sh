@@ -41,10 +41,14 @@ if 'POSTGRES_PASSWORD="$POSTGRES_PASSWORD"' not in harness_blocks[1] or 'POSTGRE
     raise SystemExit("activation must document both required PostgreSQL variable names")
 if "fsynced" not in text or "retry blocked" not in text:
     raise SystemExit("documentation does not describe durable retained state")
+normalized_text = " ".join(text.split())
+if "PRIVATE_CHAT_PYTHON_ORIGIN=\"$PRIVATE_CHAT_PYTHON_ORIGIN\"" not in harness_blocks[0] or "PRIVATE_CHAT_PYTHON_ORIGIN" not in normalized_text:
+    raise SystemExit("documentation does not describe the required candidate Python origin")
+if "origin-only HTTP/HTTPS URL" not in normalized_text or "private/loopback `nip.io` hosts" not in normalized_text:
+    raise SystemExit("documentation does not describe the local origin policy")
 
 if "DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf" not in harness_blocks[0]:
     raise SystemExit("preflight does not document the exact approved Front image ref")
-normalized_text = " ".join(text.split())
 if "Python and Teams use their local `develop` refs, while Studio uses its fixed local `feat/daiana-313` ref" not in normalized_text:
     raise SystemExit("documentation does not record the fixed per-repository source baselines")
 if "Daiana quota changes" not in text:

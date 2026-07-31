@@ -38,7 +38,11 @@ Front, Python, Teams, and application Studio feature heads. It is separate from 
 
 The current HTTP nip.io route requires `NODE_ENV=development` together with
 `PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true`. The candidate override sets
-both values on **both** `daiananext` and `daianapython`. This is intentionally
+both values on **both** `daiananext` and `daianapython`, and requires the
+non-empty `PRIVATE_CHAT_PYTHON_ORIGIN` only on `daiananext`. That origin must be
+an origin-only HTTP/HTTPS URL: HTTP is limited to localhost, loopback, or
+private/loopback `nip.io` hosts; HTTPS follows the existing Front proxy policy.
+Credentials, paths, queries, and fragments are rejected. This is intentionally
 development-only configuration for the local HTTP E2E path and is not present
 in the production/base Compose files. Preflight renders the complete candidate
 Compose model and rejects missing, duplicate, conflicting, or wrong-service
@@ -61,8 +65,9 @@ ALLOW_LOCAL_FEATURE_REFS=1 \
 POSTGRES_PASSWORD="$POSTGRES_PASSWORD" POSTGRES_DB="$POSTGRES_DB" \
 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
 DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
-DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
-DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+ DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
+ PRIVATE_CHAT_PYTHON_ORIGIN="$PRIVATE_CHAT_PYTHON_ORIGIN" \
+ DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
  DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150 \
   DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e \
   DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
@@ -87,9 +92,10 @@ POSTGRES_PASSWORD="$POSTGRES_PASSWORD" POSTGRES_DB="$POSTGRES_DB" \
 DAIANA_HARNESS_MODE=local-candidate \
 DAIANA_HARNESS_OPERATION=candidate \
 DAIANA_DEPLOYMENT_MODE=local-candidate \
-DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 \
-DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
-DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+ DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 \
+ DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
+ PRIVATE_CHAT_PYTHON_ORIGIN="$PRIVATE_CHAT_PYTHON_ORIGIN" \
+ DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
   DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150 \
   DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e \
   DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 \

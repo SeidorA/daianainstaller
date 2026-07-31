@@ -352,7 +352,14 @@ require_candidate_environment_set() {
   candidate_keys="$(env_key_set "$container")"
   while IFS= read -r key; do
      [[ -n "$key" ]] || continue
-     case ",$baseline_keys," in *",$key,"*) ;; *) case "$key" in NODE_ENV|PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN) ;; *) return 1 ;; esac ;; esac
+     case ",$baseline_keys," in *",$key,"*) ;; *)
+       case "$key" in
+         NODE_ENV|PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN) ;;
+         PRIVATE_CHAT_PYTHON_ORIGIN) [[ "$container" == "$NEXT_CONTAINER" ]] || return 1 ;;
+         *) return 1 ;;
+       esac
+       ;;
+     esac
   done <<< "$candidate_keys"
   while IFS= read -r key; do
     [[ -n "$key" ]] || continue
@@ -367,6 +374,7 @@ require_candidate_environment_contract() {
   done
   candidate_only=""
   if service_is_development_candidate "$service"; then candidate_only='NODE_ENV PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN'; fi
+  [[ "$service" == daiananext ]] && candidate_only="$candidate_only PRIVATE_CHAT_PYTHON_ORIGIN"
   candidate_contract="$(env_contract "$container")" || return 1
   image_contract="$(image_environment_contract "$candidate_image")" || return 1
   while IFS='|' read -r key actual_hash; do
@@ -374,7 +382,9 @@ require_candidate_environment_contract() {
       if [[ "$key" == NODE_ENV && "$candidate_only" == *NODE_ENV* ]]; then
        [[ "$actual_hash" == "$(printf '%s' development | text_sha256)" ]] || return 1
       elif [[ "$key" == PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN && "$candidate_only" == *PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN* ]]; then
-        [[ "$actual_hash" == "$(printf '%s' true | text_sha256)" ]] || return 1
+         [[ "$actual_hash" == "$(printf '%s' true | text_sha256)" ]] || return 1
+      elif [[ "$key" == PRIVATE_CHAT_PYTHON_ORIGIN && "$candidate_only" == *PRIVATE_CHAT_PYTHON_ORIGIN* ]]; then
+        [[ -n "${PRIVATE_CHAT_PYTHON_ORIGIN:-}" && "$actual_hash" == "$(printf '%s' "$PRIVATE_CHAT_PYTHON_ORIGIN" | text_sha256)" ]] || return 1
      else
       expected_hash="$(printf '%s\n' "$baseline_contract" | awk -F '|' -v key="$key" '$1 == key { print $2; exit }')"
       if [[ -n "$expected_hash" ]]; then
@@ -503,6 +513,9 @@ require_candidate_configuration() {
     require_exact_env_entry "$container" 'NODE_ENV=development' || die "candidate container $container is not using the exact development-only environment"
     require_exact_env_entry "$container" 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true' || die "candidate container $container is missing the exact insecure local origin guard"
   fi
+  if [[ "$service" == daiananext ]]; then
+    require_exact_env_entry "$container" "PRIVATE_CHAT_PYTHON_ORIGIN=${PRIVATE_CHAT_PYTHON_ORIGIN:?}" || die "candidate container $container is missing the exact private-chat Python origin"
+  fi
 }
 
 require_paths() {
@@ -540,10 +553,39 @@ validate_candidate_compose_contract() {
   # world contract for the candidate file.
   if ! compose_candidate_overlay config --format json 2>/dev/null |
     EXPECTED_NEXT_IMAGE="$DAIANA_CANDIDATE_NEXT_IMAGE" \
-    EXPECTED_PYTHON_IMAGE="$DAIANA_CANDIDATE_PYTHON_IMAGE" \
-    EXPECTED_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
-    EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
-    python3 -c 'import json, os, re, sys
+     EXPECTED_PYTHON_IMAGE="$DAIANA_CANDIDATE_PYTHON_IMAGE" \
+     EXPECTED_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
+     EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
+     EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN="${PRIVATE_CHAT_PYTHON_ORIGIN:?}" \
+     python3 -c 'import json, os, re, sys
+
+def valid_origin(value):
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
+    if not value or any(char.isspace() for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        parsed.port
+        if parsed.scheme == "https":
+            return True
+        if host.lower() == "localhost":
+            return True
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            suffix = ".nip.io"
+            if not host.lower().endswith(suffix):
+                return False
+            address = ip_address(host[:-len(suffix)])
+            return address.is_private or address.is_loopback
+    except ValueError:
+        return False
 
 def pairs(items):
     keys = [key for key, _ in items]
@@ -574,6 +616,11 @@ try:
         if service["image"] != image or not re.fullmatch(re.escape(repository) + r":sha-[0-9a-f]{40}", service["image"]):
             raise ValueError("overlay image mismatch")
         expected_environment = {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"} if name in ("daiananext", "daianapython") else {}
+        if name == "daiananext":
+            origin = os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"]
+            if not valid_origin(origin):
+                raise ValueError("invalid private-chat Python origin")
+            expected_environment["PRIVATE_CHAT_PYTHON_ORIGIN"] = origin
         if service["pull_policy"] != "never" or service.get("environment", {}) != expected_environment:
             raise ValueError("overlay candidate settings mismatch")
         if service["networks"] != {"default": None}:
@@ -603,11 +650,40 @@ except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
     EXPECTED_PYTHON_IMAGE="$DAIANA_CANDIDATE_PYTHON_IMAGE" \
     EXPECTED_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
     EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
+    EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN="${PRIVATE_CHAT_PYTHON_ORIGIN:?}" \
     NEXT_BASELINE_CONTRACT="$next_contract" \
     PYTHON_BASELINE_CONTRACT="$python_contract" \
     MSTEAMS_BASELINE_CONTRACT="$msteams_contract" \
     STUDIO_BASELINE_CONTRACT="$studio_contract" \
     python3 -c 'import hashlib, json, os, re, sys
+
+def valid_origin(value):
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
+    if not value or any(char.isspace() for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        parsed.port
+        if parsed.scheme == "https":
+            return True
+        if host.lower() == "localhost":
+            return True
+        try:
+            return ip_address(host).is_loopback
+        except ValueError:
+            suffix = ".nip.io"
+            if not host.lower().endswith(suffix):
+                return False
+            address = ip_address(host[:-len(suffix)])
+            return address.is_private or address.is_loopback
+    except ValueError:
+        return False
 
 def pairs(pairs):
     keys = [key for key, _ in pairs]
@@ -652,6 +728,8 @@ try:
                 raise ValueError("invalid baseline contract")
             baseline[key] = digest
         candidate_only = {"NODE_ENV", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN"} if name in ("daiananext", "daianapython") else set()
+        if name == "daiananext":
+            candidate_only.add("PRIVATE_CHAT_PYTHON_ORIGIN")
         if set(environment) - (set(baseline) | candidate_only):
             raise ValueError("environment scope mismatch")
         for key, value in environment.items():
@@ -662,12 +740,16 @@ try:
                     raise ValueError("NODE_ENV mismatch")
                 if key == "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN" and value != "true":
                     raise ValueError("origin guard mismatch")
+                if key == "PRIVATE_CHAT_PYTHON_ORIGIN" and (value != os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"] or not valid_origin(value)):
+                    raise ValueError("private-chat Python origin mismatch")
             elif hashlib.sha256(value.encode()).hexdigest() != baseline[key]:
                 raise ValueError("baseline environment mismatch")
         for key in baseline:
             if key not in environment:
                 raise ValueError("missing explicit baseline environment key")
         required = {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"} if name in ("daiananext", "daianapython") else {}
+        if name == "daiananext":
+            required["PRIVATE_CHAT_PYTHON_ORIGIN"] = os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"]
         if any(environment.get(key) != value for key, value in required.items()):
             raise ValueError("missing candidate environment addition")
 except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -848,6 +930,7 @@ candidate_config_fingerprint() {
     {
       safe_config_fingerprint "$container"
       printf '%s\n' 'NODE_ENV=development' 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true'
+      [[ "$container" == "$NEXT_CONTAINER" ]] && printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\n' "${PRIVATE_CHAT_PYTHON_ORIGIN:?}"
     } | text_sha256
   else
     safe_config_fingerprint "$container"
