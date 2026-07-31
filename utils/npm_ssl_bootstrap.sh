@@ -64,6 +64,8 @@ NPM_CONNECT_TIMEOUT="${NPM_CONNECT_TIMEOUT:-5}"
 NPM_OPERATION_TIMEOUT="${NPM_OPERATION_TIMEOUT:-15}"
 NPM_READY_ATTEMPTS="${NPM_READY_ATTEMPTS:-120}"
 NPM_READY_DELAY="${NPM_READY_DELAY:-2}"
+NPM_TLS_VERIFY_ATTEMPTS="${NPM_TLS_VERIFY_ATTEMPTS:-$NPM_READY_ATTEMPTS}"
+NPM_TLS_VERIFY_DELAY="${NPM_TLS_VERIFY_DELAY:-$NPM_READY_DELAY}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-$NPM_ADMIN_EMAIL}"
 TLS_MODE="${TLS_MODE:-}"
 USE_LOCAL_TLS_CERTS="${USE_LOCAL_TLS_CERTS:-0}"
@@ -526,7 +528,7 @@ derive_tls_verify_ip() {
 build_tls_verify_args() {
   local domain="$1" tls_verify_ip ca_file
   tls_verify_ip="$(derive_tls_verify_ip "$domain")" || return 1
-  TLS_VERIFY_ARGS=(--request GET --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout "$NPM_CONNECT_TIMEOUT" --max-time "$NPM_OPERATION_TIMEOUT" -o /dev/null)
+  TLS_VERIFY_ARGS=(--request GET --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout "$NPM_CONNECT_TIMEOUT" --max-time "$NPM_OPERATION_TIMEOUT" -o /dev/null)
   if [[ -n "$tls_verify_ip" ]]; then
     TLS_VERIFY_ARGS+=(--resolve "$domain:443:$tls_verify_ip")
   fi
@@ -775,7 +777,7 @@ certificate_expiry_epoch() {
   fi
 }
 
-verify_certificate_for_domain() {
+verify_certificate_metadata_for_domain() {
   local cert_id="$1"
   local domain="$2"
   local certificate provider status expires_on expiry_epoch cert_path returned_id
@@ -824,12 +826,36 @@ verify_certificate_for_domain() {
     echo "NPM certificate verification failed for $domain (expiry invalid; response redacted)." >&2
     return 1
   fi
+}
+
+verify_trusted_tls_for_domain() {
+  local domain="$1"
 
   build_tls_verify_args "$domain" || return 1
   if ! curl "${TLS_VERIFY_ARGS[@]}"; then
     echo "NPM certificate verification failed for $domain (TLS handshake or hostname verification failed)." >&2
     return 1
   fi
+}
+
+verify_trusted_tls_after_mutation() {
+  local domain="$1"
+  local attempt
+
+  for ((attempt = 1; attempt <= NPM_TLS_VERIFY_ATTEMPTS; attempt++)); do
+    if verify_trusted_tls_for_domain "$domain"; then
+      if (( attempt > 1 )); then
+        echo "NPM TLS verification succeeded for $domain after reload wait (attempt $attempt/$NPM_TLS_VERIFY_ATTEMPTS)." >&2
+      fi
+      return 0
+    fi
+    if (( attempt < NPM_TLS_VERIFY_ATTEMPTS )); then
+      echo "NPM TLS verification retry for $domain (attempt $attempt/$NPM_TLS_VERIFY_ATTEMPTS); waiting for Nginx reload." >&2
+      sleep "$NPM_TLS_VERIFY_DELAY"
+    fi
+  done
+
+  return 1
 }
 
 # Busca proxy host existente por dominio
@@ -1790,11 +1816,9 @@ main() {
         cert_id=""
         ;;
     esac
-    # Certificate metadata, PEM/SAN, expiry, and trusted TLS verification are
-    # pre-mutation gates for the current host.  A later host can still fail
-    # this gate after an earlier host has mutated, so preserve the existing
-    # rollback journal whenever it already contains a prior mutation.
-    if [[ "$TLS_MODE" != "none" ]] && ! verify_certificate_for_domain "$cert_id" "$domain"; then
+    # Certificate metadata, PEM/SAN, and expiry are pre-mutation gates. The
+    # trusted handshake must run only after this host has TLS configured.
+    if [[ "$TLS_MODE" != "none" ]] && ! verify_certificate_metadata_for_domain "$cert_id" "$domain"; then
       if [[ -s "$ROLLBACK_RECORDS" ]]; then
         fail_after_proxy_mutation "certificate_verification_failed"
       else
@@ -1804,6 +1828,10 @@ main() {
     fi
     if ! ensure_proxy_host "$prefix" "$domain" "$up_host" "$up_port" "$cert_id"; then
       fail_after_proxy_mutation "proxy_host_application_failed"
+      return 1
+    fi
+    if [[ "$TLS_MODE" != "none" ]] && ! verify_trusted_tls_after_mutation "$domain"; then
+      fail_after_proxy_mutation "certificate_verification_failed"
       return 1
     fi
   done

@@ -1,4 +1,4 @@
-.PHONY: help install certs update rollback rollback-list uninstall purge version up down restart stop ps logs compose-config bootstrap
+.PHONY: help install certs remove-certs update rollback rollback-list uninstall purge version up down restart stop ps logs compose-config bootstrap
 
 COMPOSE_FILES := -f docker-compose.yml -f docker-compose.app.yml -f docker-compose.npm.yml
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else printf 'docker compose'; fi)
@@ -17,6 +17,7 @@ help:
 	@echo "Lifecycle:"
 	@echo "  make install                  Run install-daiana.sh"
 	@echo "  make certs                    Apply TLS to existing NPM proxy hosts"
+	@echo "  make remove-certs CONFIRM=1  Remove TLS and refresh HTTP public URLs"
 	@echo "  make update                   Run update-daiana.sh"
 	@echo "  make rollback                 Roll back to latest update snapshot"
 	@echo "  make rollback SNAPSHOT=<id>   Roll back to a specific snapshot"
@@ -43,6 +44,10 @@ install:
 
 certs:
 	@bash apply-certs.sh
+
+remove-certs:
+	@test "$(CONFIRM)" = 1 || { echo "Use: make remove-certs CONFIRM=1" >&2; exit 1; }
+	@bash remove-certs.sh --confirm $(if $(CERTIFICATE_ID),--certificate-id=$(CERTIFICATE_ID),) $(if $(ALL_MANAGED),--all-managed,)
 
 update:
 	@bash update-daiana.sh
@@ -166,5 +171,5 @@ bootstrap:
 	[ -n "$$BASE_DOMAIN" ] && echo "  - BASE_DOMAIN: $$BASE_DOMAIN"; \
 	echo ""; \
 	echo "Running npm_ssl_bootstrap..."; \
-	bash utils/npm_ssl_bootstrap.sh; \
+		bash utils/npm_ssl_bootstrap.sh; \
 	echo "✓ Bootstrap complete"

@@ -87,6 +87,7 @@ chmod +x "$TMP_DIR/utils/npm_ssl_bootstrap.sh"
 
 cat > "$TMP_DIR/update-daiana.sh" <<'UPDATE'
 #!/usr/bin/env bash
+: > update-called
 exit "${UPDATE_STATUS:-0}"
 UPDATE
 chmod +x "$TMP_DIR/update-daiana.sh"
@@ -99,32 +100,17 @@ NAMES=(
   NEXT_PUBLIC_API_QDRANT NEXT_PUBLIC_API_MSTEAMS NEXT_PUBLIC_API_WHATSAPP
   NEXT_PUBLIC_API_STUDIO_BASE_URL NEXT_PUBLIC_WEBUI_URL NEXT_PUBLIC_APP_URL
 )
-[[ "${1:-}" == compose && "${2:-}" == exec && "${3:-}" == -T && "${4:-}" == db ]] || exit 90
-[[ "${5:-}" == sh && "${6:-}" == -c ]] || exit 91
+[[ "${1:-}" == compose && "${2:-}" == --project-name && "${3:-}" == daiana-app ]] || exit 90
+[[ "${4:-}" == --project-directory && "${6:-}" == -f ]] || exit 91
+[[ "${8:-}" == -f && "${10:-}" == exec && "${11:-}" == -T && "${12:-}" == db ]] || exit 92
+[[ "${13:-}" == sh && "${14:-}" == -c ]] || exit 93
 IFS= read -r _password
-shift 7
+shift 15
 sql=''
 value_keys=()
-value_values=()
-set_value() {
-  local key="$1" value="$2" i
-  for i in "${!value_keys[@]}"; do
-    if [[ "${value_keys[i]}" == "$key" ]]; then value_values[i]="$value"; return; fi
-  done
-  value_keys+=("$key")
-  value_values+=("$value")
-}
-get_value() {
-  local key="$1" i
-  for i in "${!value_keys[@]}"; do
-    if [[ "${value_keys[i]}" == "$key" ]]; then printf '%s' "${value_values[i]}"; return; fi
-  done
-}
 while (($#)); do
   case "$1" in
     -v)
-      assignment="$2"
-      set_value "${assignment%%=*}" "${assignment#*=}"
       shift 2
       ;;
     -Atqc)
@@ -136,33 +122,28 @@ while (($#)); do
   esac
 done
 
-if [[ "$sql" == *public_supabase_url* && "${VAULT_FAIL_MODE:-}" == forward ]]; then
+if [[ "$sql" == *"vault_upsert_secret"* && "${VAULT_FAIL_MODE:-}" == forward ]]; then
   exit 42
 fi
-if [[ "$sql" == *restore_* ]]; then
+if [[ "$sql" == *"vault_upsert_secret"* && "$sql" != *"WITH expected"* ]]; then
   : > "$VAULT_DB_FILE"
-  for i in {1..9}; do
-    printf '%s\t%s\n' "${NAMES[$((i - 1))]}" "$(get_value "restore_$i")" >> "$VAULT_DB_FILE"
-  done
+  printf '%s\n' "$sql" | sed -nE "s/.*vault_upsert_secret\\('([^']*)', '([^']*)'.*/\\2\\t\\1/p" >> "$VAULT_DB_FILE"
+  [[ "$(wc -l < "$VAULT_DB_FILE" | tr -d ' ')" == 9 ]] || exit 43
   exit 0
 fi
-if [[ "$sql" == *verify_* ]]; then
+if [[ "$sql" == *"WITH expected"* && "$sql" != *"vault_upsert_secret"* ]]; then
   [[ "${VAULT_REREAD_FAIL:-0}" == 1 ]] && exit 43
-  for i in {1..9}; do
-    actual="$(awk -F '\t' -v key="${NAMES[$((i - 1))]}" '$1 == key { print $2 }' "$VAULT_DB_FILE")"
-    [[ "$actual" == "$(get_value "verify_$i")" ]] || exit 43
-  done
+  while IFS=$'\t' read -r name expected; do
+    [[ -n "$name" && -n "$expected" ]] || continue
+    actual="$(awk -F '\t' -v key="$name" '$1 == key { print $2 }' "$VAULT_DB_FILE")"
+    [[ "$actual" == "$expected" ]] || exit 43
+  done < <(printf '%s\n' "$sql" | sed -nE "s/.*\\('([^']*)', '([^']*)'\\).*/\\1\\t\\2/p")
   exit 0
 fi
-if [[ "$sql" == *public_supabase_url* ]]; then
+if [[ "$sql" == *"vault_upsert_secret"* ]]; then
   : > "$VAULT_DB_FILE"
-  names=(
-    NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_API_PYTHON NEXT_PUBLIC_API_TRAINING
-    NEXT_PUBLIC_API_QDRANT NEXT_PUBLIC_API_MSTEAMS NEXT_PUBLIC_API_WHATSAPP
-    NEXT_PUBLIC_API_STUDIO_BASE_URL NEXT_PUBLIC_WEBUI_URL NEXT_PUBLIC_APP_URL
-  )
-  params=(public_supabase_url public_api_python public_api_training public_api_qdrant public_api_msteams public_api_whatsapp public_api_studio public_webui public_app)
-  for i in {0..8}; do printf '%s\t%s\n' "${names[$i]}" "$(get_value "${params[$i]}")" >> "$VAULT_DB_FILE"; done
+  printf '%s\n' "$sql" | sed -nE "s/.*vault_upsert_secret\\('([^']*)', '([^']*)'.*/\\2\\t\\1/p" >> "$VAULT_DB_FILE"
+  [[ "$(wc -l < "$VAULT_DB_FILE" | tr -d ' ')" == 9 ]] || exit 92
   exit 0
 fi
 exit 92
@@ -216,11 +197,12 @@ run_success_case() {
   (cd "$case_dir" && PATH="$TMP_DIR/bin:$PATH" VAULT_DB_FILE="$case_dir/vault.db" UPDATE_STATUS=0 TLS_MOCK_LOG="$case_dir/tls.log" \
       TLS_MOCK_CERT_SAN='api nginx port qdrant daiana studio supa whatsapp vanna webui msteams' \
       BASE_DOMAIN=example.test POSTGRES_PASSWORD=redacted-secret NPM_ADMIN_EMAIL=test@example.test NPM_ADMIN_PASS=redacted-secret TLS_MODE=local \
-      NPM_LOCAL_CERT_FILE="$case_dir/cert" NPM_LOCAL_KEY_FILE="$case_dir/key" bash ./apply-certs.sh) >/dev/null 2>&1
+      NPM_LOCAL_CERT_FILE="$case_dir/cert" NPM_LOCAL_KEY_FILE="$case_dir/key" bash ./apply-certs.sh) >"$case_dir/output" 2>&1 || { cat "$case_dir/output" >&2; return 1; }
   assert_vault_exact https "$case_dir/vault.db"
   grep -q '^SUPABASE_PUBLIC_URL=https://supa.example.test$' "$case_dir/.env"
   grep -q '^INTERNAL_API_URL=' "$case_dir/.env" && ! grep -q '^INTERNAL_API_URL=https://' "$case_dir/.env"
   grep -q 'handshake=secure' "$case_dir/tls.log"
+  [[ -f "$case_dir/update-called" ]]
 }
 
 run_case() {
