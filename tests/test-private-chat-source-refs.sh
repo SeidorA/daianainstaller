@@ -7,6 +7,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 harness="$ROOT_DIR/utils/private-chat-harness.sh"
 front_repo="$TMP_DIR/front"
 python_repo="$TMP_DIR/python"
+msteams_repo="$TMP_DIR/msteams"
+studio_repo="$TMP_DIR/studio"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
@@ -26,16 +28,22 @@ make_repo() {
 
 front_sha="$(make_repo "$front_repo")"
 python_sha="$(make_repo "$python_repo")"
+msteams_sha="$(make_repo "$msteams_repo")"
+studio_sha="$(make_repo "$studio_repo")"
 normal_next="cloudseidoranalytics/daiana:sha-$front_sha"
 normal_python="cloudseidoranalytics/daianapython:sha-$python_sha"
+normal_msteams="cloudseidoranalytics/daianamsteams:sha-$msteams_sha"
+normal_studio="cloudseidoranalytics/daianastudio:sha-$studio_sha"
 local_guard=(DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1)
-normal_env=(DAIANA_FRONT_REPO="$front_repo" DAIANA_PYTHON_REPO="$python_repo" DAIANA_CANDIDATE_NEXT_IMAGE="$normal_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$normal_python" "${local_guard[@]}")
+normal_env=(DAIANA_FRONT_REPO="$front_repo" DAIANA_PYTHON_REPO="$python_repo" DAIANA_MSTEAMS_REPO="$msteams_repo" DAIANA_STUDIO_REPO="$studio_repo" DAIANA_CANDIDATE_NEXT_IMAGE="$normal_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$normal_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$normal_msteams" DAIANA_CANDIDATE_STUDIO_IMAGE="$normal_studio" "${local_guard[@]}")
 env "${normal_env[@]}" bash "$harness" validate-source-refs >/dev/null || fail "normal ancestry path rejected"
 pass "normal ancestry path remains source-valid with mandatory local-candidate guards"
 
 approved_next='cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
 approved_python='cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab'
-approved_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python")
+approved_msteams="cloudseidoranalytics/daianamsteams:sha-$msteams_sha"
+approved_studio="cloudseidoranalytics/daianastudio:sha-$studio_sha"
+approved_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$msteams_repo" DAIANA_STUDIO_REPO="$studio_repo" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$msteams_sha" DAIANA_APPROVED_STUDIO_SOURCE_SHA="$studio_sha")
 local_guard=(ALLOW_LOCAL_FEATURE_REFS=1 "${local_guard[@]}")
 env "${approved_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "approved refs with opt-in rejected"
 pass "exact approved full SHAs pass only with local opt-in and guards"
@@ -49,6 +57,8 @@ expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_NEXT_IMA
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_NEXT_IMAGE='cloudseidoranalytics/daiananext:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_PYTHON_IMAGE='cloudseidoranalytics/daianapython:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_NEXT_IMAGE='attacker/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
+expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_MSTEAMS_IMAGE='cloudseidoranalytics/daianamsteams:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA= DAIANA_APPROVED_STUDIO_SOURCE_SHA=
 expect_reject "${approved_env[@]}" ALLOW_LOCAL_FEATURE_REFS=0 DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python"
 expect_reject "${approved_env[@]}" ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python"
 for guard in DAIANA_HARNESS_MODE DAIANA_HARNESS_OPERATION DAIANA_DEPLOYMENT_MODE DAIANA_HARNESS_NO_PUSH DAIANA_HARNESS_NO_PUBLICATION DAIANA_HARNESS_NO_REGISTRY_PUBLISH; do

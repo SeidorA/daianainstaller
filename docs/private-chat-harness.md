@@ -1,27 +1,26 @@
 # Authenticated private-chat candidate harness
 
 The harness is a registry-free, local-only candidate path for the verified
-Front and Python feature heads. It is separate from `install-daiana.sh`,
+Front, Python, Teams, and application Studio feature heads. It is separate from `install-daiana.sh`,
 `update-daiana.sh`, Portainer, and the deployment-bundle pull path.
 
 ## Preconditions
 
-- The host and both candidate images are arm64.
+- The host and all four candidate images are arm64.
 - External Docker network `daiana-mgmt` exists.
 - The candidate Compose project identity is fixed to `daiana-app`, matching the
   Installer baseline. `DAIANA_COMPOSE_PROJECT_NAME` is not an override: if set,
   it must equal exactly `daiana-app`; unset/default is also resolved to
   `daiana-app`. The rendered candidate model must declare external network
-  `daiana-mgmt`; only `daiananext` and `daianapython` are selected for mutation.
-- `daiana-next` and `daiana-python` are running the known `v2.1.9` baseline. The
+  `daiana-mgmt`; only `daiananext`, `daianapython`, `daianamsteams`, and `daianastudio` are selected for mutation.
+- `daiana-next`, `daiana-python`, `daiana-msteams`, and `daiana-studio` are running their known baseline images. The
   known v2.1.9 Python image does not expose `NODE_ENV`; the harness treats that
   missing entry as an explicit **implicit-production** baseline contract. An
   explicit `NODE_ENV=production` is also accepted exactly once. Wrong,
   duplicate, conflicting, or malformed `NODE_ENV` entries are rejected. The
   harness never adds `NODE_ENV=production` to make a baseline pass.
-- Candidate images are already built locally and tagged with their full source
-  SHA using the exact approved repositories: `cloudseidoranalytics/daiana:sha-` followed by 40 lowercase hexadecimal characters and `cloudseidoranalytics/daianapython:sha-` followed by 40 lowercase hexadecimal characters.
-- Normal source-ref validation requires both candidate SHAs to be ancestors of
+- Candidate images are already built locally and tagged with their full source SHA using the exact approved repositories: `cloudseidoranalytics/daiana`, `cloudseidoranalytics/daianapython`, `cloudseidoranalytics/daianamsteams`, and `cloudseidoranalytics/daianastudio`, each followed by `:sha-` and 40 lowercase hexadecimal characters. Teams and Studio require explicit full-SHA allowlist inputs; missing, malformed, or unapproved values fail closed.
+- Normal source-ref validation requires all candidate SHAs to be ancestors of
   the fixed repository-local `develop` ref. Every invocation also requires
   `DAIANA_HARNESS_MODE=local-candidate`, `DAIANA_HARNESS_OPERATION=candidate`,
   `DAIANA_DEPLOYMENT_MODE=local-candidate`, `DAIANA_HARNESS_NO_PUSH=1`,
@@ -41,6 +40,11 @@ in the production/base Compose files. Preflight renders the complete candidate
 Compose model and rejects missing, duplicate, conflicting, or wrong-service
 candidate environment before the migration boundary.
 
+Teams and application Studio receive no candidate-only environment values or
+health claim. Their baseline environment and volumes come from the Compose
+merge, and readiness remains unavailable unless the committed Compose contract
+provides a deterministic health check.
+
 ## Commands
 
 Preflight is read-only and checks the local candidate inputs without contacting
@@ -55,15 +59,19 @@ DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
 DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
 DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
-DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
-bash utils/private-chat-harness.sh preflight
+ DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
+ DAIANA_CANDIDATE_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
+ DAIANA_CANDIDATE_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
+ DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
+ DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+ bash utils/private-chat-harness.sh preflight
 ```
 
-For the two approved feature heads, preflight also needs the same explicit
+For the approved feature heads, preflight also needs the same explicit
 local-only exception guards shown in the activation command below.
 
 Activation requires an additional explicit consent variable. It recreates
- only `daiananext` and `daianapython` under Compose project `daiana-app`, uses `--pull never`, and never removes
+only the four application services under Compose project `daiana-app`, uses `--pull never`, and never removes
 volumes or the external network:
 
 ```bash
@@ -76,14 +84,18 @@ DAIANA_DEPLOYMENT_MODE=local-candidate \
 DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 \
 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
 DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
-DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
-bash utils/private-chat-harness.sh activate
+ DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
+ DAIANA_CANDIDATE_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
+ DAIANA_CANDIDATE_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
+ DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
+ DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+ bash utils/private-chat-harness.sh activate
 ```
 
 `POSTGRES_PASSWORD` and `POSTGRES_DB` must be non-empty environment variables;
 the command intentionally references their existing values and never places
 secret values in this document or shell history. `ALLOW_LOCAL_FEATURE_REFS=1` is a narrowly scoped, local-only exception. It is
-accepted only for the two full SHAs above, with all six explicit
+accepted only for the approved Front/Python pair and explicit Teams/Studio full-SHA allowlists, with all six explicit
 local-candidate/candidate/no-push/
 no-publication/no-registry-publish guards. It is rejected for release, update,
 production, publication, and ordinary deployment-bundle paths; the candidate
@@ -116,8 +128,10 @@ DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes \
 ALLOW_LOCAL_FEATURE_REFS=1 \
 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
 DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
-DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
-bash utils/private-chat-harness.sh cleanup
+ DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
+ DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
+ DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+ bash utils/private-chat-harness.sh cleanup
 ```
 
 Cleanup first re-runs the mandatory local-candidate context, fixed `develop`
@@ -130,7 +144,7 @@ configuration fingerprints, and requested image values. A mismatch is rejected
 before baseline Compose is invoked and redacted diagnostics are retained; a
 tampered receipt cannot bypass the source or image guards. Only after those
 candidate checks pass does cleanup use the baseline Compose files without the
-candidate overlay. It then asserts that both baseline containers are running again without the candidate's
+candidate overlay. It then asserts that all four baseline containers are running again without the candidate's
 development-only HTTP environment. A missing baseline `NODE_ENV` remains
 missing; cleanup does not add or remove unrelated environment entries. The
 baseline receipt records `implicit-production` or `explicit-production`
@@ -205,7 +219,7 @@ the ordinary deployment-bundle control check.
 
 ### Rollback boundary
 
-Cleanup restores only the two application containers to the recorded baseline;
+Cleanup restores only the four application containers to the recorded baseline;
 it does not undo committed migrations. After the migration commitment, receipt,
 rollback, or verification boundary is crossed, failure leaves redacted
 diagnostics and `manual-cleanup-required` with retry blocked. Retained failure,
@@ -219,9 +233,9 @@ restore the baseline runtime and reconcile the forward-only database changes;
 do not use the local exception as a production rollback mechanism.
 
 Receipts record `compose_project=daiana-app`, `network=daiana-mgmt`, and the
-mutation scope `daianapython,daiananext`. These identity fields are validated
+mutation scope `daianapython,daiananext,daianamsteams,daianastudio`. These identity fields are validated
 before candidate startup and before baseline cleanup. A project override,
 wrong rendered network, or out-of-scope service fails before migration or
 runtime mutation. After migration commitment or any post-migration failure,
-reconcile the database and restore the two app containers manually before
+reconcile the database and restore the four app containers manually before
 retrying.

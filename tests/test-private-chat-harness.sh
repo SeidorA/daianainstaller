@@ -10,8 +10,23 @@ harness="$ROOT_DIR/utils/private-chat-harness.sh"
 override="$ROOT_DIR/docker-compose.private-chat-candidate.yml"
 next_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727130000_add_history_message_refs.sql"
 quota_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727140000_allow_authorized_private_message_quota.sql"
+make_source_repo() {
+  local repo="$1"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.invalid
+  git -C "$repo" config user.name harness-test
+  : > "$repo/source"
+  git -C "$repo" add source
+  git -C "$repo" commit -q -m initial
+  git -C "$repo" branch -M develop
+}
+make_source_repo "$TMP_DIR/msteams"
+make_source_repo "$TMP_DIR/studio"
 next_image='cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
 python_image='cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab'
+msteams_image="cloudseidoranalytics/daianamsteams:sha-$(git -C "$TMP_DIR/msteams" rev-parse develop)"
+studio_image="cloudseidoranalytics/daianastudio:sha-$(git -C "$TMP_DIR/studio" rev-parse develop)"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
@@ -35,6 +50,9 @@ grep -q 'require_exact_env_entry' "$harness" || fail "candidate environment asse
 grep -q 'compose_environment_contract' "$harness" || fail "baseline Compose-explicit environment contract is missing"
 grep -q 'image_environment_contract' "$harness" || fail "candidate image-default environment contract is missing"
 grep -q 'candidate_next_image_id' "$harness" || fail "candidate image ID binding is missing"
+for service_ref in DAIANA_CANDIDATE_MSTEAMS_IMAGE DAIANA_CANDIDATE_STUDIO_IMAGE candidate_msteams_image_id candidate_studio_image_id msteams_candidate_config_sha256 studio_candidate_config_sha256; do
+  grep -q "$service_ref" "$harness" || fail "four-service receipt/config contract is missing: $service_ref"
+done
 pass "harness has staged receipts, compensation boundary, exact env checks, and image proof"
 
 grep -q 'pull_policy: never' "$override" || fail "candidate override permits image pulling"
@@ -69,18 +87,28 @@ case "${1:-}" in
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 9
          elif [[ "${5:-}" == 'cloudseidoranalytics/daiana:v2.1.9' ]]; then
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 1
-         elif [[ "${5:-}" == 'cloudseidoranalytics/daianapython:v2.1.9' ]]; then
-           printf 'cloudseidoranalytics/daianapython@sha256:%064d\n' 2
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianapython:v2.1.9' ]]; then
+            printf 'cloudseidoranalytics/daianapython@sha256:%064d\n' 2
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianamsteams:v2.1.9' ]]; then
+            printf 'cloudseidoranalytics/daianamsteams@sha256:%064d\n' 5
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianastudio:v3.1.3' ]]; then
+            printf 'cloudseidoranalytics/daianastudio@sha256:%064d\n' 6
          else
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 3
          fi
        elif [[ "${FAKE_SCENARIO:-}" == runtime_digest_mismatch ]]; then
         if [[ "${5:-}" == *daiana-next* || "${5:-}" == *daiananext* ]]; then printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 9 9
+        elif [[ "${5:-}" == 'cloudseidoranalytics/daianamsteams:v2.1.9' ]]; then printf 'sha256:%064d|cloudseidoranalytics/daianamsteams@sha256:%064d|arm64\n' 5 5
+        elif [[ "${5:-}" == 'cloudseidoranalytics/daianastudio:v3.1.3' ]]; then printf 'sha256:%064d|cloudseidoranalytics/daianastudio@sha256:%064d|arm64\n' 6 6
         else printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 2 2; fi
        elif [[ "${5:-}" == *'cloudseidoranalytics/daiana:sha-'* ]]; then
          [[ "${FAKE_SCENARIO:-}" == candidate_image_id_mismatch ]] && printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 9 9 || printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 3 3
-       elif [[ "${5:-}" == *'cloudseidoranalytics/daianapython:sha-'* ]]; then
-         printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 4 4
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianapython:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 4 4
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianamsteams:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianamsteams@sha256:%064d|arm64\n' 7 7
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianastudio:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianastudio@sha256:%064d|arm64\n' 8 8
        elif [[ "${5:-}" == 'cloudseidoranalytics/daiana:v2.1.9' ]]; then
           [[ "${FAKE_SCENARIO:-}" == baseline_image_digest_mutation && -e "$FAKE_STATE.restored" ]] && printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 1 9 || printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 1 1
        else printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 2 2; fi
@@ -101,9 +129,13 @@ case "${1:-}" in
          if [[ "${FAKE_SCENARIO:-}" == post_start || "${FAKE_SCENARIO:-}" == compensation_failure ]]; then printf 'local/wrong:sha-0000000000000000000000000000000000000000\n'
          elif [[ "${FAKE_SCENARIO:-}" == tag_retarget ]]; then printf 'cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
          else printf '%s\n' "${DAIANA_CANDIDATE_NEXT_IMAGE:?}"; fi
-      elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-python ]]; then printf '%s\n' "${DAIANA_CANDIDATE_PYTHON_IMAGE:?}"
-      elif [[ "$container" == daiana-next ]]; then printf 'cloudseidoranalytics/daiana:v2.1.9\n'
-      else printf 'cloudseidoranalytics/daianapython:v2.1.9\n'; fi
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-python ]]; then printf '%s\n' "${DAIANA_CANDIDATE_PYTHON_IMAGE:?}"
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-msteams ]]; then printf '%s\n' "${DAIANA_CANDIDATE_MSTEAMS_IMAGE:?}"
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-studio ]]; then printf '%s\n' "${DAIANA_CANDIDATE_STUDIO_IMAGE:?}"
+       elif [[ "$container" == daiana-next ]]; then printf 'cloudseidoranalytics/daiana:v2.1.9\n'
+       elif [[ "$container" == daiana-python ]]; then printf 'cloudseidoranalytics/daianapython:v2.1.9\n'
+       elif [[ "$container" == daiana-msteams ]]; then printf 'cloudseidoranalytics/daianamsteams:v2.1.9\n'
+       else printf 'cloudseidoranalytics/daianastudio:v3.1.3\n'; fi
     elif [[ "${4:-}" == *State.Status* ]]; then printf 'running\n'
     elif [[ "${4:-}" == *'range .Config.Env'* ]]; then
       if [[ "$state" == candidate || "$state" == partial ]]; then
@@ -113,11 +145,14 @@ case "${1:-}" in
           printf 'NODE_ENV=development\n'
           [[ "${FAKE_SCENARIO:-}" == env_duplicate_conflict ]] && printf 'NODE_ENV=production\n' || printf 'NODE_ENV=development\n'
           printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'
-           elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
-           elif [[ "$container" == daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
-          else printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'; fi
-       else
-          if [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python ]]; then
+            elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
+              [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n' || printf 'UNRELATED_SETTING=baseline\n';
+            elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+             elif [[ "$container" == daiana-next || "$container" == daiana-python ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+           else printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'; fi
+        else
+           if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
+           elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python ]]; then
             if [[ "$container" == daiana-next ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; else printf 'UNRELATED_SETTING=baseline\n'; fi
           elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then
             printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\n'
@@ -134,10 +169,13 @@ case "${1:-}" in
        fi
      elif [[ "${4:-}" == *Config.Env* ]]; then
          if [[ "$state" == candidate || "$state" == partial ]]; then
-             if [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
-             elif [[ "$container" == daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
-            else printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'; fi
-        elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python && "$container" == daiana-python ]]; then printf '["UNRELATED_SETTING=baseline"]\n'
+              if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
+                [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf '["UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"]\n' || printf '["UNRELATED_SETTING=baseline"]\n';
+              elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
+               elif [[ "$container" == daiana-next || "$container" == daiana-python ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
+             else printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'; fi
+         elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then printf '["UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
+         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python && "$container" == daiana-python ]]; then printf '["UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_malformed ]]; then printf '["NODE_ENV","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_mutation && -e "${FAKE_STATE}.env-mutated" ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=mutated"]\n'
@@ -147,10 +185,14 @@ case "${1:-}" in
         if [[ "$state" == candidate || "$state" == partial ]]; then
           if [[ "$container" == daiana-next ]]; then
             [[ "${FAKE_SCENARIO:-}" == immutable_id_mismatch ]] && printf 'sha256:%064d\n' 9 || printf 'sha256:%064d\n' 3
-          else printf 'sha256:%064d\n' 4; fi
+           elif [[ "$container" == daiana-msteams ]]; then printf 'sha256:%064d\n' 7
+           elif [[ "$container" == daiana-studio ]]; then printf 'sha256:%064d\n' 8
+           else printf 'sha256:%064d\n' 4; fi
         elif [[ "$container" == daiana-next ]]; then
            [[ "${FAKE_SCENARIO:-}" == baseline_image_id_mutation && -e "$FAKE_STATE.restored" ]] && printf 'sha256:%064d\n' 9 || printf 'sha256:%064d\n' 1
-        else printf 'sha256:%064d\n' 2; fi
+         elif [[ "$container" == daiana-msteams ]]; then printf 'sha256:%064d\n' 5
+         elif [[ "$container" == daiana-studio ]]; then printf 'sha256:%064d\n' 6
+         else printf 'sha256:%064d\n' 2; fi
      elif [[ "${4:-}" == *'{{.Id}}'* ]]; then printf '%s-%s-id\n' "$state" "$container"
     elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
     else printf 'container-id\n'; fi
@@ -194,9 +236,13 @@ import json, os
 scenario = os.environ.get("FAKE_SCENARIO", "")
 next_image = os.environ["DAIANA_CANDIDATE_NEXT_IMAGE"]
 python_image = os.environ["DAIANA_CANDIDATE_PYTHON_IMAGE"]
+msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
+studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
 services = {
     "daiananext": {"command": None, "entrypoint": None, "image": next_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
     "daianapython": {"command": None, "entrypoint": None, "image": python_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
+    "daianamsteams": {"command": None, "entrypoint": None, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
+    "daianastudio": {"command": None, "entrypoint": None, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
 }
 mutation = scenario.removeprefix("overlay_")
 if mutation == "ports": services["daiananext"]["ports"] = ["8080:8080"]
@@ -231,6 +277,8 @@ import json, os
 scenario = os.environ.get("FAKE_SCENARIO", "")
 next_image = os.environ["DAIANA_CANDIDATE_NEXT_IMAGE"]
 python_image = os.environ["DAIANA_CANDIDATE_PYTHON_IMAGE"]
+msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
+studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
 env_next = {"UNRELATED_SETTING": "baseline"}
 env_python = dict(env_next)
 if os.environ.get("COMPOSE_CANDIDATE_RENDERED") == "yes":
@@ -247,7 +295,9 @@ model = {
     "studio": {"command": None, "entrypoint": None, "image": "supabase/studio:fixture", "networks": {"default": None}},
     "daianavanna": {"command": None, "entrypoint": None, "image": "cloudseidoranalytics/daianavanna:v2.1.9", "networks": {"default": None}},
     "daiananext": {"command": None, "entrypoint": None, "environment": env_next, "image": next_image, "pull_policy": "never", "networks": {"default": None}},
-    "daianapython": {"command": None, "entrypoint": None, "environment": env_python, "image": python_image, "pull_policy": "never", "networks": {"default": None}},
+     "daianapython": {"command": None, "entrypoint": None, "environment": env_python, "image": python_image, "pull_policy": "never", "networks": {"default": None}},
+     "daianamsteams": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline"}, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
+     "daianastudio": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline"}, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
     },
 }
 if scenario == "compose_image_mismatch":
@@ -307,7 +357,7 @@ run_case() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-$scenario"
   : > "$TMP_DIR/docker-$scenario.log"
   export FAKE_SCENARIO="$scenario" FAKE_STATE="$TMP_DIR/docker-state-$scenario" DOCKER_LOG="$TMP_DIR/docker-$scenario.log"
-   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image"
+    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_MSTEAMS_REPO="$TMP_DIR/msteams" DAIANA_STUDIO_REPO="$TMP_DIR/studio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$msteams_image" DAIANA_CANDIDATE_STUDIO_IMAGE="$studio_image" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="${msteams_image##*:sha-}" DAIANA_APPROVED_STUDIO_SOURCE_SHA="${studio_image##*:sha-}"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
   export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
@@ -404,17 +454,17 @@ run_success() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-success"
   : > "$TMP_DIR/docker-success.log"
   : > "$TMP_DIR/durable-success.log"
-   export FAKE_SCENARIO="${SUCCESS_SCENARIO:-none}" FAKE_STATE="$TMP_DIR/docker-state-success" DOCKER_LOG="$TMP_DIR/docker-success.log"
-   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image"
+    export FAKE_SCENARIO="${SUCCESS_SCENARIO:-none}" FAKE_STATE="$TMP_DIR/docker-state-success" DOCKER_LOG="$TMP_DIR/docker-success.log"
+    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_MSTEAMS_REPO="$TMP_DIR/msteams" DAIANA_STUDIO_REPO="$TMP_DIR/studio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$msteams_image" DAIANA_CANDIDATE_STUDIO_IMAGE="$studio_image" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="${msteams_image##*:sha-}" DAIANA_APPROVED_STUDIO_SOURCE_SHA="${studio_image##*:sha-}"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
   export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
    export DAIANA_HARNESS_TEST_DURABLE_TRACE_FILE="$TMP_DIR/durable-success.log" DAIANA_COMPOSE_PROJECT_NAME=daiana-app
-     DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes PATH="$FAKE_BIN:$PATH" bash "$harness" activate >/dev/null 2>&1 || fail "successful activation failed"
+      DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes PATH="$FAKE_BIN:$PATH" bash "$harness" activate || fail "successful activation failed"
   [[ -e "$state_dir/active" && -s "$state_dir/active.receipt" ]] || fail "successful activation did not publish active receipt/marker"
    [[ -e "$state_dir/migrations-applied.receipt" ]] || fail "successful activation omitted migration receipt"
    grep -q '^compose_project=daiana-app$' "$state_dir/active.receipt" || fail "active receipt omitted fixed Compose project identity"
-   grep -q '^mutation_services=daianapython,daiananext$' "$state_dir/active.receipt" || fail "active receipt omitted mutation service scope"
+    grep -q '^mutation_services=daianapython,daiananext,daianamsteams,daianastudio$' "$state_dir/active.receipt" || fail "active receipt omitted mutation service scope"
   grep -q 'fsync-file-after-rename:' "$TMP_DIR/durable-success.log" || fail "successful activation omitted post-rename file fsync"
   grep -q 'fsync-directory-after-rename:' "$TMP_DIR/durable-success.log" || fail "successful activation omitted post-rename directory fsync"
   baseline_line="$(grep -n 'baseline.receipt' "$TMP_DIR/durable-success.log" | sed -n '1p' | cut -d: -f1)"
@@ -437,7 +487,7 @@ run_success() {
   [[ "$(cat "$TMP_DIR/docker-state-success")" == baseline ]] || fail "successful cleanup did not restore baseline"
   [[ ! -e "$state_dir/active" ]] || fail "successful cleanup retained active marker"
   [[ -e "$state_dir/migrations-applied.receipt" ]] || fail "successful cleanup discarded durable migration receipt"
-  pass "both rendered candidate services are present with the exact development environment"
+pass "all four rendered candidate services preserve the exact development environment contract"
 }
 
 SUCCESS_SCENARIO=compose_image_default_env_omitted run_success
@@ -555,7 +605,7 @@ PY
 done
 
 grep -q '^COMPOSE_PROJECT_NAME="daiana-app"$' "$harness" || fail "Compose project identity is still environment-overridable"
-grep -q 'COMPOSE_MUTATION_SERVICES=(daianapython daiananext)' "$harness" || fail "candidate mutation service scope is not fixed"
+grep -q 'COMPOSE_MUTATION_SERVICES=(daianapython daiananext daianamsteams daianastudio)' "$harness" || fail "candidate mutation service scope is not fixed"
 grep -q 'config --format json' "$harness" || fail "canonical rendered Compose JSON validation is missing"
 grep -q 'object_pairs_hook' "$harness" || fail "duplicate JSON key rejection is missing"
 pass "canonical full-model JSON validation and fixed mutation scope are present"
