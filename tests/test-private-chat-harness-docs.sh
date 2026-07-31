@@ -44,7 +44,22 @@ if "fsynced" not in text or "retry blocked" not in text:
 
 if "DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf" not in harness_blocks[0]:
     raise SystemExit("preflight does not document the exact approved Front image ref")
-if "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab" not in harness_blocks[0]:
-    raise SystemExit("preflight does not document the exact approved Python image ref")
+normalized_text = " ".join(text.split())
+if "Python and Teams use their local `develop` refs, while Studio uses its fixed local `feat/daiana-313` ref" not in normalized_text:
+    raise SystemExit("documentation does not record the fixed per-repository source baselines")
+if "Daiana quota changes" not in text:
+    raise SystemExit("documentation does not explain the Studio baseline rationale")
+expected_refs = (
+    "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150",
+    "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e",
+    "DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69",
+    "DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf",
+    "DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150",
+    "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e",
+    "DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69",
+)
+missing_refs = [ref for ref in expected_refs if ref not in harness_blocks[0]]
+if missing_refs:
+    raise SystemExit("preflight does not document exact four-service source refs: %s" % ", ".join(missing_refs))
 print("PASS: documented harness commands parse and carry every mandatory local guard")
 PY

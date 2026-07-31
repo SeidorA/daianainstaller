@@ -20,15 +20,19 @@ Front, Python, Teams, and application Studio feature heads. It is separate from 
   duplicate, conflicting, or malformed `NODE_ENV` entries are rejected. The
   harness never adds `NODE_ENV=production` to make a baseline pass.
 - Candidate images are already built locally and tagged with their full source SHA using the exact approved repositories: `cloudseidoranalytics/daiana`, `cloudseidoranalytics/daianapython`, `cloudseidoranalytics/daianamsteams`, and `cloudseidoranalytics/daianastudio`, each followed by `:sha-` and 40 lowercase hexadecimal characters. Teams and Studio require explicit full-SHA allowlist inputs; missing, malformed, or unapproved values fail closed.
-- Normal source-ref validation requires all candidate SHAs to be ancestors of
-  the fixed repository-local `develop` ref. Every invocation also requires
+- Normal source-ref validation uses each repository's fixed local baseline:
+  Front uses `develop`, Python and Teams use their local `develop` refs, while
+  Studio uses its fixed local `feat/daiana-313` ref. The Studio baseline is
+  intentional because it contains the Daiana quota changes. Every invocation also requires
   `DAIANA_HARNESS_MODE=local-candidate`, `DAIANA_HARNESS_OPERATION=candidate`,
   `DAIANA_DEPLOYMENT_MODE=local-candidate`, `DAIANA_HARNESS_NO_PUSH=1`,
   `DAIANA_HARNESS_NO_PUBLICATION=1`, and
   `DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1`. `DAIANA_FEATURE_BASE_REF` is
-  rejected and cannot select an alternate ancestry base. The only exception is the exact approved pair Front
+  rejected and cannot select an alternate ancestry base. The only exception is the exact approved four-service candidate: Front
   `90bd701c3eec30f7d3b56fb230050f7e46fd98bf` and Python
-  `16e161f468f1976d15ba40b1312dc5f247d64dab`.
+  `3ebc16d029b06efd2a0cd6b02980c45324948150`, Teams
+  `c31a2262eb5720707861ac79a8d4cd55311c730e`, and Studio
+  `ed872073e7f359e7b8c88c6c2a26f55c46582c69`. The caller must supply all four matching `DAIANA_APPROVED_*_SOURCE_SHA` values; missing, short, wrong, or mismatched values fail closed.
 - PostgreSQL has been backed up. Installer migrations are forward-only and are
   not reversed by cleanup.
 
@@ -59,11 +63,13 @@ DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
 DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
 DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
- DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
- DAIANA_CANDIDATE_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
- DAIANA_CANDIDATE_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
- DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
- DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+ DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150 \
+  DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e \
+  DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
+  DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+  DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150 \
+  DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e \
+  DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
  bash utils/private-chat-harness.sh preflight
 ```
 
@@ -84,18 +90,20 @@ DAIANA_DEPLOYMENT_MODE=local-candidate \
 DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 \
 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
 DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
- DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab \
- DAIANA_CANDIDATE_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
- DAIANA_CANDIDATE_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
- DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
- DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+  DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150 \
+  DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e \
+  DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
+  DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+  DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150 \
+  DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e \
+  DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
  bash utils/private-chat-harness.sh activate
 ```
 
 `POSTGRES_PASSWORD` and `POSTGRES_DB` must be non-empty environment variables;
 the command intentionally references their existing values and never places
 secret values in this document or shell history. `ALLOW_LOCAL_FEATURE_REFS=1` is a narrowly scoped, local-only exception. It is
-accepted only for the approved Front/Python pair and explicit Teams/Studio full-SHA allowlists, with all six explicit
+accepted only for the exact approved four-service SHA allowlist, with all six explicit
 local-candidate/candidate/no-push/
 no-publication/no-registry-publish guards. It is rejected for release, update,
 production, publication, and ordinary deployment-bundle paths; the candidate
@@ -126,16 +134,18 @@ Restore the known baseline app images after the candidate run:
 ```bash
 DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes \
 ALLOW_LOCAL_FEATURE_REFS=1 \
-DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
-DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
+ DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate \
+ DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 \
  DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1 \
- DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" \
- DAIANA_APPROVED_STUDIO_SOURCE_SHA="$DAIANA_APPROVED_STUDIO_SOURCE_SHA" \
+  DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+  DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150 \
+  DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e \
+  DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 \
  bash utils/private-chat-harness.sh cleanup
 ```
 
-Cleanup first re-runs the mandatory local-candidate context, fixed `develop`
-ancestry, exact approved source-SHA allowlist, and per-component image
+Cleanup first re-runs the mandatory local-candidate context, fixed per-repository
+ancestry (`develop` for Front/Python/Teams and `feat/daiana-313` for Studio), exact approved source-SHA allowlist, and per-component image
 repository/full-SHA-tag validation from the active receipt. It then validates
 the active receipt against the currently running candidate containers: running
 state, container IDs, exact image references, immutable image IDs and
@@ -212,7 +222,8 @@ never uses persistent Supabase volumes.
 
 The source-ref contract is covered separately by
 `bash tests/test-private-chat-source-refs.sh`, including the normal ancestry
-path, exact approved full-SHA pair, short/wrong refs, missing opt-in, release,
+path for the three `develop` baselines and Studio `feat/daiana-313`, exact approved
+four-source-SHA allowlist, short/wrong refs, missing opt-in, release,
 publish, update, publication, production, push, disabled no-publication and
 no-registry-publish guards, enabled publish and registry-publish guards, and
 the ordinary deployment-bundle control check.

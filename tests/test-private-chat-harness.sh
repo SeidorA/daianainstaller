@@ -24,7 +24,7 @@ make_source_repo() {
 make_source_repo "$TMP_DIR/msteams"
 make_source_repo "$TMP_DIR/studio"
 next_image='cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
-python_image='cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab'
+python_image='cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150'
 msteams_image="cloudseidoranalytics/daianamsteams:sha-$(git -C "$TMP_DIR/msteams" rev-parse develop)"
 studio_image="cloudseidoranalytics/daianastudio:sha-$(git -C "$TMP_DIR/studio" rev-parse develop)"
 
@@ -357,7 +357,7 @@ run_case() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-$scenario"
   : > "$TMP_DIR/docker-$scenario.log"
   export FAKE_SCENARIO="$scenario" FAKE_STATE="$TMP_DIR/docker-state-$scenario" DOCKER_LOG="$TMP_DIR/docker-$scenario.log"
-    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_MSTEAMS_REPO="$TMP_DIR/msteams" DAIANA_STUDIO_REPO="$TMP_DIR/studio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$msteams_image" DAIANA_CANDIDATE_STUDIO_IMAGE="$studio_image" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="${msteams_image##*:sha-}" DAIANA_APPROVED_STUDIO_SOURCE_SHA="${studio_image##*:sha-}"
+    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
   export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
@@ -455,7 +455,7 @@ run_success() {
   : > "$TMP_DIR/docker-success.log"
   : > "$TMP_DIR/durable-success.log"
     export FAKE_SCENARIO="${SUCCESS_SCENARIO:-none}" FAKE_STATE="$TMP_DIR/docker-state-success" DOCKER_LOG="$TMP_DIR/docker-success.log"
-    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_MSTEAMS_REPO="$TMP_DIR/msteams" DAIANA_STUDIO_REPO="$TMP_DIR/studio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$msteams_image" DAIANA_CANDIDATE_STUDIO_IMAGE="$studio_image" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="${msteams_image##*:sha-}" DAIANA_APPROVED_STUDIO_SOURCE_SHA="${studio_image##*:sha-}"
+    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=90bd701c3eec30f7d3b56fb230050f7e46fd98bf DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
   export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"

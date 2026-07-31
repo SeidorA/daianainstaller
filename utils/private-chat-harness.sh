@@ -776,7 +776,9 @@ require_local_candidate_context() {
 }
 
 validate_candidate_source_refs() {
-  local next_sha python_sha msteams_sha studio_sha front_repo python_repo msteams_repo studio_repo base_ref
+  local next_sha python_sha msteams_sha studio_sha front_repo python_repo msteams_repo studio_repo
+  local front_base_ref python_base_ref msteams_base_ref studio_base_ref
+  local approved_next_sha approved_python_sha approved_msteams_sha approved_studio_sha
   require_local_candidate_context
   [[ "${DAIANA_CANDIDATE_NEXT_IMAGE:-}" == "$APPROVED_NEXT_IMAGE_REPOSITORY":* ]] || die "Next candidate image must use the approved repository"
   [[ "${DAIANA_CANDIDATE_PYTHON_IMAGE:-}" == "$APPROVED_PYTHON_IMAGE_REPOSITORY":* ]] || die "Python candidate image must use the approved repository"
@@ -790,8 +792,11 @@ validate_candidate_source_refs() {
   python_repo="${DAIANA_PYTHON_REPO:-$ROOT_DIR/../daianapython}"
   msteams_repo="${DAIANA_MSTEAMS_REPO:-$ROOT_DIR/../daianamsteams}"
   studio_repo="${DAIANA_STUDIO_REPO:-$ROOT_DIR/../daianastudio}"
-  [[ -z "${DAIANA_FEATURE_BASE_REF:-}" ]] || die "DAIANA_FEATURE_BASE_REF is not a supported override; ancestry is fixed to develop"
-  base_ref="develop"
+  [[ -z "${DAIANA_FEATURE_BASE_REF:-}" ]] || die "DAIANA_FEATURE_BASE_REF is not a supported override; ancestry is fixed by repository policy"
+  front_base_ref='develop'
+  python_base_ref='develop'
+  msteams_base_ref='develop'
+  studio_base_ref='feat/daiana-313'
   [[ -d "$front_repo/.git" || -f "$front_repo/.git" ]] || die "Front source repository is unavailable for ancestry validation"
   [[ -d "$python_repo/.git" || -f "$python_repo/.git" ]] || die "Python source repository is unavailable for ancestry validation"
   [[ -d "$msteams_repo/.git" || -f "$msteams_repo/.git" ]] || die "Teams source repository is unavailable for ancestry validation"
@@ -800,20 +805,41 @@ validate_candidate_source_refs() {
   git -C "$python_repo" cat-file -e "$python_sha^{commit}" 2>/dev/null || die "Python candidate source SHA is not present in the local source repository"
   git -C "$msteams_repo" cat-file -e "$msteams_sha^{commit}" 2>/dev/null || die "Teams candidate source SHA is not present in the local source repository"
   git -C "$studio_repo" cat-file -e "$studio_sha^{commit}" 2>/dev/null || die "Studio candidate source SHA is not present in the local source repository"
-  git -C "$front_repo" rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 || die "Front repository develop ref is unavailable"
-  git -C "$python_repo" rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 || die "Python repository develop ref is unavailable"
-  git -C "$msteams_repo" rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 || die "Teams repository develop ref is unavailable"
-  git -C "$studio_repo" rev-parse --verify "$base_ref^{commit}" >/dev/null 2>&1 || die "Studio repository develop ref is unavailable"
-  if git -C "$front_repo" merge-base --is-ancestor "$next_sha" "$base_ref" \
-     && git -C "$python_repo" merge-base --is-ancestor "$python_sha" "$base_ref" \
-     && git -C "$msteams_repo" merge-base --is-ancestor "$msteams_sha" "$base_ref" \
-     && git -C "$studio_repo" merge-base --is-ancestor "$studio_sha" "$base_ref"; then
+  approved_next_sha="${DAIANA_APPROVED_NEXT_SOURCE_SHA:-}"
+  approved_python_sha="${DAIANA_APPROVED_PYTHON_SOURCE_SHA:-}"
+  approved_msteams_sha="${DAIANA_APPROVED_MSTEAMS_SOURCE_SHA:-}"
+  approved_studio_sha="${DAIANA_APPROVED_STUDIO_SOURCE_SHA:-}"
+  if [[ "$next_sha" == 90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+     && "$python_sha" == 3ebc16d029b06efd2a0cd6b02980c45324948150 \
+     && "$msteams_sha" == c31a2262eb5720707861ac79a8d4cd55311c730e \
+     && "$studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]]; then
+    [[ "${ALLOW_LOCAL_FEATURE_REFS:-}" == 1 ]] || die "approved feature refs require ALLOW_LOCAL_FEATURE_REFS=1"
+    [[ "$approved_next_sha" =~ ^[a-f0-9]{40}$ \
+      && "$approved_python_sha" =~ ^[a-f0-9]{40}$ \
+      && "$approved_msteams_sha" =~ ^[a-f0-9]{40}$ \
+      && "$approved_studio_sha" =~ ^[a-f0-9]{40}$ ]] || die "all four services require explicit full-SHA allowlist inputs"
+    [[ "$approved_next_sha" == 90bd701c3eec30f7d3b56fb230050f7e46fd98bf \
+      && "$approved_python_sha" == 3ebc16d029b06efd2a0cd6b02980c45324948150 \
+      && "$approved_msteams_sha" == c31a2262eb5720707861ac79a8d4cd55311c730e \
+      && "$approved_studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]] || die "caller-supplied source SHA allowlist is not approved"
+    [[ "$next_sha" == "$approved_next_sha" \
+      && "$python_sha" == "$approved_python_sha" \
+      && "$msteams_sha" == "$approved_msteams_sha" \
+      && "$studio_sha" == "$approved_studio_sha" ]] || die "candidate source SHA does not match the approved four-service allowlist"
     return 0
   fi
-  [[ "${ALLOW_LOCAL_FEATURE_REFS:-}" == 1 ]] || die "candidate source refs must be ancestors of $base_ref; ALLOW_LOCAL_FEATURE_REFS=1 is required for the approved local exception"
-  [[ "$next_sha" == 90bd701c3eec30f7d3b56fb230050f7e46fd98bf && "$python_sha" == 16e161f468f1976d15ba40b1312dc5f247d64dab ]] || die "local feature-ref exception accepts only the approved Front/Python pair"
-  [[ "${DAIANA_APPROVED_MSTEAMS_SOURCE_SHA:-}" =~ ^[a-f0-9]{40}$ && "${DAIANA_APPROVED_STUDIO_SOURCE_SHA:-}" =~ ^[a-f0-9]{40}$ ]] || die "Teams and Studio require explicit full-SHA allowlist inputs"
-  [[ "$msteams_sha" == "$DAIANA_APPROVED_MSTEAMS_SOURCE_SHA" && "$studio_sha" == "$DAIANA_APPROVED_STUDIO_SOURCE_SHA" ]] || die "Teams or Studio source SHA is not approved"
+  git -C "$front_repo" rev-parse --verify "$front_base_ref^{commit}" >/dev/null 2>&1 || die "Front repository develop ref is unavailable"
+  git -C "$python_repo" rev-parse --verify "$python_base_ref^{commit}" >/dev/null 2>&1 || die "Python repository develop ref is unavailable"
+  git -C "$msteams_repo" rev-parse --verify "$msteams_base_ref^{commit}" >/dev/null 2>&1 || die "Teams repository develop ref is unavailable"
+  git -C "$studio_repo" rev-parse --verify "$studio_base_ref^{commit}" >/dev/null 2>&1 || die "Studio repository feat/daiana-313 ref is unavailable"
+  if git -C "$front_repo" merge-base --is-ancestor "$next_sha" "$front_base_ref" \
+     && git -C "$python_repo" merge-base --is-ancestor "$python_sha" "$python_base_ref" \
+     && git -C "$msteams_repo" merge-base --is-ancestor "$msteams_sha" "$msteams_base_ref" \
+     && git -C "$studio_repo" merge-base --is-ancestor "$studio_sha" "$studio_base_ref"; then
+    return 0
+  fi
+  [[ "${ALLOW_LOCAL_FEATURE_REFS:-}" == 1 ]] || die "candidate source refs must be ancestors of the fixed repository baselines; ALLOW_LOCAL_FEATURE_REFS=1 is required for the approved local exception"
+  die "local feature-ref exception accepts only the exact approved four-service candidate"
 }
 
 candidate_config_fingerprint() {
