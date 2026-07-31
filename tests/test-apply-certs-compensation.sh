@@ -12,42 +12,42 @@ NAMES=(
 )
 
 write_env() {
-  local scheme="$1" file="$2"
+  local scheme="$1" file="$2" domain="${3:-example.test}"
   cat > "$file" <<ENV
-BASE_DOMAIN=example.test
+BASE_DOMAIN=$domain
 NPM_ADMIN_EMAIL=test@example.test
 NPM_ADMIN_PASS=redacted-secret
-STUDIO_BASE_URL=${scheme}://studio.example.test
-SUPABASE_PUBLIC_URL=${scheme}://supa.example.test
-API_EXTERNAL_URL=${scheme}://supa.example.test/auth/v1
-SITE_URL=${scheme}://daiana.example.test
-WEBUI_BASE_URL=${scheme}://webui.example.test
-BACKEND_BASE_URL=${scheme}://api.example.test
-WS_BASE_URL=${scheme}://whatsapp.example.test
-MS_BASE_URL=${scheme}://msteams.example.test
-VANNA_BASE_URL=${scheme}://vanna.example.test
-QDRANT_BASE_URL=${scheme}://qdrant.example.test
-CORS_ALLOW_ORIGIN=${scheme}://daiana.example.test
-NEXT_PUBLIC_APP_URL=${scheme}://daiana.example.test
+STUDIO_BASE_URL=${scheme}://studio.$domain
+SUPABASE_PUBLIC_URL=${scheme}://supa.$domain
+API_EXTERNAL_URL=${scheme}://supa.$domain/auth/v1
+SITE_URL=${scheme}://daiana.$domain
+WEBUI_BASE_URL=${scheme}://webui.$domain
+BACKEND_BASE_URL=${scheme}://api.$domain
+WS_BASE_URL=${scheme}://whatsapp.$domain
+MS_BASE_URL=${scheme}://msteams.$domain
+VANNA_BASE_URL=${scheme}://vanna.$domain
+QDRANT_BASE_URL=${scheme}://qdrant.$domain
+CORS_ALLOW_ORIGIN=${scheme}://daiana.$domain
+NEXT_PUBLIC_APP_URL=${scheme}://daiana.$domain
 INTERNAL_API_URL=http://daiana-python:5002
 ENV
 }
 
 write_vault() {
-  local scheme="$1" file="$2"
+  local scheme="$1" file="$2" domain="${3:-example.test}"
   local name host
   : > "$file"
   for name in "${NAMES[@]}"; do
     case "$name" in
-      NEXT_PUBLIC_SUPABASE_URL) host=supa.example.test ;;
-      NEXT_PUBLIC_API_PYTHON) host=api.example.test ;;
-      NEXT_PUBLIC_API_TRAINING) host=vanna.example.test ;;
-      NEXT_PUBLIC_API_QDRANT) host=qdrant.example.test ;;
-      NEXT_PUBLIC_API_MSTEAMS) host=msteams.example.test ;;
-      NEXT_PUBLIC_API_WHATSAPP) host=whatsapp.example.test ;;
-      NEXT_PUBLIC_API_STUDIO_BASE_URL) host=studio.example.test ;;
-      NEXT_PUBLIC_WEBUI_URL) host=webui.example.test ;;
-      NEXT_PUBLIC_APP_URL) host=daiana.example.test ;;
+      NEXT_PUBLIC_SUPABASE_URL) host=supa.$domain ;;
+      NEXT_PUBLIC_API_PYTHON) host=api.$domain ;;
+      NEXT_PUBLIC_API_TRAINING) host=vanna.$domain ;;
+      NEXT_PUBLIC_API_QDRANT) host=qdrant.$domain ;;
+      NEXT_PUBLIC_API_MSTEAMS) host=msteams.$domain ;;
+      NEXT_PUBLIC_API_WHATSAPP) host=whatsapp.$domain ;;
+      NEXT_PUBLIC_API_STUDIO_BASE_URL) host=studio.$domain ;;
+      NEXT_PUBLIC_WEBUI_URL) host=webui.$domain ;;
+      NEXT_PUBLIC_APP_URL) host=daiana.$domain ;;
     esac
     printf '%s\t%s://%s\n' "$name" "$scheme" "$host" >> "$file"
   done
@@ -151,55 +151,56 @@ DOCKER
 chmod +x "$TMP_DIR/bin/docker"
 
 assert_vault_exact() {
-  local scheme="$1" file="$2" name host expected
+  local scheme="$1" file="$2" domain="${3:-example.test}" name host expected
   [[ "$(wc -l < "$file" | tr -d ' ')" == 9 ]] || exit 1
   for name in "${NAMES[@]}"; do
     case "$name" in
-      NEXT_PUBLIC_SUPABASE_URL) host=supa.example.test ;;
-      NEXT_PUBLIC_API_PYTHON) host=api.example.test ;;
-      NEXT_PUBLIC_API_TRAINING) host=vanna.example.test ;;
-      NEXT_PUBLIC_API_QDRANT) host=qdrant.example.test ;;
-      NEXT_PUBLIC_API_MSTEAMS) host=msteams.example.test ;;
-      NEXT_PUBLIC_API_WHATSAPP) host=whatsapp.example.test ;;
-      NEXT_PUBLIC_API_STUDIO_BASE_URL) host=studio.example.test ;;
-      NEXT_PUBLIC_WEBUI_URL) host=webui.example.test ;;
-      NEXT_PUBLIC_APP_URL) host=daiana.example.test ;;
+      NEXT_PUBLIC_SUPABASE_URL) host=supa ;;
+      NEXT_PUBLIC_API_PYTHON) host=api ;;
+      NEXT_PUBLIC_API_TRAINING) host=vanna ;;
+      NEXT_PUBLIC_API_QDRANT) host=qdrant ;;
+      NEXT_PUBLIC_API_MSTEAMS) host=msteams ;;
+      NEXT_PUBLIC_API_WHATSAPP) host=whatsapp ;;
+      NEXT_PUBLIC_API_STUDIO_BASE_URL) host=studio ;;
+      NEXT_PUBLIC_WEBUI_URL) host=webui ;;
+      NEXT_PUBLIC_APP_URL) host=daiana ;;
     esac
-    expected="${scheme}://${host}"
+    expected="${scheme}://${host}.${domain}"
     [[ "$(awk -F '\t' -v key="$name" '$1 == key { print $2 }' "$file")" == "$expected" ]] || exit 1
   done
 }
 
 create_test_certificate() {
-  local cert_file="$1" key_file="$2" config="$TMP_DIR/cert.cnf" san host
+  local cert_file="$1" key_file="$2" domain="${3:-example.test}" config="$TMP_DIR/cert.cnf" san host
   : > "$config"
-  printf '%s\n' '[req]' 'prompt=no' 'distinguished_name=req_dn' 'x509_extensions=req_ext' '[req_dn]' 'CN=api.example.test' '[req_ext]' 'subjectAltName=@alt_names' '[alt_names]' >> "$config"
+  printf '%s\n' '[req]' 'prompt=no' 'distinguished_name=req_dn' 'x509_extensions=req_ext' '[req_dn]' "CN=api.$domain" '[req_ext]' 'subjectAltName=@alt_names' '[alt_names]' >> "$config"
   san=1
   for host in api nginx port qdrant daiana studio supa whatsapp vanna webui msteams; do
-    printf 'DNS.%s=%s.example.test\n' "$san" "$host" >> "$config"
+    printf 'DNS.%s=%s.%s\n' "$san" "$host" "$domain" >> "$config"
     san=$((san + 1))
   done
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" \
-    -subj '/CN=api.example.test' -config "$config" >/dev/null 2>&1
+    -subj "/CN=api.$domain" -config "$config" >/dev/null 2>&1
 }
 
 run_success_case() {
-  local scheme="$1" case_dir
+  local scheme="$1" domain="${2:-example.test}" case_dir
   case_dir="$TMP_DIR/success-$scheme"
+  [[ "$domain" == example.test ]] || case_dir="$TMP_DIR/success-${scheme}-nip"
   mkdir -p "$case_dir"
-  write_env "$scheme" "$case_dir/.env"
-  write_vault "$scheme" "$case_dir/vault.db"
-  create_test_certificate "$case_dir/cert" "$case_dir/key"
+  write_env "$scheme" "$case_dir/.env" "$domain"
+  write_vault "$scheme" "$case_dir/vault.db" "$domain"
+  create_test_certificate "$case_dir/cert" "$case_dir/key" "$domain"
   cp "$TMP_DIR/apply-certs.sh" "$case_dir/apply-certs.sh"
   mkdir -p "$case_dir/utils"; cp "$TMP_DIR/utils/public-url-propagation.sh" "$case_dir/utils/"
   cp "$TMP_DIR/utils/npm_ssl_bootstrap.sh" "$case_dir/utils/"
   cp "$TMP_DIR/update-daiana.sh" "$case_dir/update-daiana.sh"
   (cd "$case_dir" && PATH="$TMP_DIR/bin:$PATH" VAULT_DB_FILE="$case_dir/vault.db" UPDATE_STATUS=0 TLS_MOCK_LOG="$case_dir/tls.log" \
       TLS_MOCK_CERT_SAN='api nginx port qdrant daiana studio supa whatsapp vanna webui msteams' \
-      BASE_DOMAIN=example.test POSTGRES_PASSWORD=redacted-secret NPM_ADMIN_EMAIL=test@example.test NPM_ADMIN_PASS=redacted-secret TLS_MODE=local \
+      BASE_DOMAIN="$domain" POSTGRES_PASSWORD=redacted-secret NPM_ADMIN_EMAIL=test@example.test NPM_ADMIN_PASS=redacted-secret TLS_MODE=local \
       NPM_LOCAL_CERT_FILE="$case_dir/cert" NPM_LOCAL_KEY_FILE="$case_dir/key" bash ./apply-certs.sh) >"$case_dir/output" 2>&1 || { cat "$case_dir/output" >&2; return 1; }
-  assert_vault_exact https "$case_dir/vault.db"
-  grep -q '^SUPABASE_PUBLIC_URL=https://supa.example.test$' "$case_dir/.env"
+  assert_vault_exact https "$case_dir/vault.db" "$domain"
+  grep -q "^SUPABASE_PUBLIC_URL=https://supa.$domain$" "$case_dir/.env"
   grep -q '^INTERNAL_API_URL=' "$case_dir/.env" && ! grep -q '^INTERNAL_API_URL=https://' "$case_dir/.env"
   grep -q 'handshake=secure' "$case_dir/tls.log"
   [[ -f "$case_dir/update-called" ]]
@@ -296,6 +297,7 @@ run_compensation_reread_failure_case() {
 
 run_success_case http
 run_success_case https
+run_success_case https 192.168.0.19.nip.io
 run_case http forward 0
 run_case http none 7
 run_case https none 7

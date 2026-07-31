@@ -142,8 +142,7 @@ restore_detached_hosts() {
 }
 
 refresh_http_projection() {
-  local stage backup vault_snapshot vault_scheme scheme compensation_failed=0
-  scheme="$(public_url_scheme)" || return 1
+  local stage backup vault_snapshot vault_scheme scheme=http compensation_failed=0
   stage="$(stage_public_env_update .env "$scheme")" || return 1
   backup="$(mktemp .env.remove.rollback.XXXXXX)" || { rm -f "$stage"; return 1; }
   cp -p .env "$backup" || { rm -f "$stage" "$backup"; return 1; }
@@ -152,7 +151,7 @@ refresh_http_projection() {
   vault_scheme="$(vault_snapshot_public_url_scheme "$vault_snapshot")" || { rm -f "$stage" "$backup" "$vault_snapshot"; return 1; }
   mv "$stage" .env || return 1
   load_dotenv .env
-  if ! vault_upsert_public_url_entries .env; then
+  if ! vault_upsert_public_url_entries .env "$scheme"; then
     vault_restore_public_url_entries "$vault_snapshot" || compensation_failed=1
     vault_verify_public_url_entries "$vault_snapshot" "$vault_scheme" || compensation_failed=1
     if ! mv "$backup" .env; then compensation_failed=1; else load_dotenv .env; fi
@@ -169,13 +168,14 @@ refresh_http_projection() {
 }
 
 compensate_public_projection() {
-  local failed=0
+  local failed=0 vault_scheme=""
   if [[ -n "${PUBLIC_ENV_BACKUP:-}" && -f "$PUBLIC_ENV_BACKUP" ]]; then
     mv "$PUBLIC_ENV_BACKUP" .env || failed=1
   fi
   if [[ -n "${PUBLIC_VAULT_SNAPSHOT:-}" && -f "$PUBLIC_VAULT_SNAPSHOT" ]]; then
+    vault_scheme="$(vault_snapshot_public_url_scheme "$PUBLIC_VAULT_SNAPSHOT")" || failed=1
     vault_restore_public_url_entries "$PUBLIC_VAULT_SNAPSHOT" || failed=1
-    vault_verify_public_url_entries "$PUBLIC_VAULT_SNAPSHOT" "$(vault_snapshot_public_url_scheme "$PUBLIC_VAULT_SNAPSHOT")" || failed=1
+    vault_verify_public_url_entries "$PUBLIC_VAULT_SNAPSHOT" "$vault_scheme" || failed=1
   fi
   load_dotenv .env
   return "$failed"
