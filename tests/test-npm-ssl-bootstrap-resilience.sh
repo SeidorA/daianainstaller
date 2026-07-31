@@ -105,6 +105,21 @@ for ((i = 1; i <= $#; i++)); do
 done
 if [[ "$url" == https://* ]]; then
   [[ "$scenario" != "tls-failure" && "$scenario" != "custom-tls-failure" ]] || exit 60
+  if [[ "$scenario" == tls-http-401 ]]; then
+    for arg in "$@"; do
+      [[ "$arg" != --fail ]] || exit 55
+    done
+    printf '{}\n401\n'
+    exit 0
+  fi
+  if [[ "$scenario" == post-mutation-tls-reload ]]; then
+    tls_probe_file="${state_file}.tls-probes"
+    tls_probes=0
+    [[ -f "$tls_probe_file" ]] && tls_probes="$(<"$tls_probe_file")"
+    tls_probes=$((tls_probes + 1))
+    printf '%s' "$tls_probes" > "$tls_probe_file"
+    [[ "$tls_probes" -gt 1 ]] || exit 60
+  fi
   requested_hostname="${url#https://}"
   requested_hostname="${requested_hostname%%/*}"
   requested_hostname="${requested_hostname%%:*}"
@@ -119,10 +134,12 @@ if [[ "$url" == https://* ]]; then
       "$requested_hostname" "$expected_hostname" >&2
     exit 51
   fi
+  printf 'HTTPS %s\n' "$url" >> "$state_file.order"
   printf '{}\n200\n'
   exit 0
 fi
 path="${url#http://127.0.0.1:81}"
+printf '%s %s\n' "$method" "$path" >> "$state_file.order"
 count=0
 [[ -f "$state_file" ]] && count="$(<"$state_file")"
 mutation_file="${state_file}.mutations"
@@ -150,7 +167,7 @@ if { [[ "$method" == PUT && "$path" == /api/nginx/proxy-hosts/* ]] ||
   payload="$payload_arg"
   mutations=$((mutations + 1))
   printf '%s' "$mutations" > "$mutation_file"
-   if [[ "$scenario" == verification-after-mutation-* || "$scenario" == issuance-after-mutation-main ]] && [[ "$path" == "/api/nginx/proxy-hosts/7" ]]; then
+   if [[ "$scenario" == success || "$scenario" == verification-after-mutation-* || "$scenario" == issuance-after-mutation-main || "$scenario" == http-only-transition || "$scenario" == http-only-post-tls-failure ]] && [[ "$path" == "/api/nginx/proxy-hosts/7" ]]; then
      required_payload_keys='["domain_names","forward_scheme","forward_host","forward_port","certificate_id","ssl_forced","hsts_enabled","hsts_subdomains","trust_forwarded_proto","http2_support","block_exploits","caching_enabled","allow_websocket_upgrade","access_list_id","advanced_config","enabled","locations"]'
      jq -e --argjson required "$required_payload_keys" '. as $object | type == "object" and ($required | all(.[]; . as $key | $object | has($key)))' <<<"$payload" >/dev/null || exit 62
      printf '%s' "$payload" > "${state_file}.proxy-host-7-put-${mutations}.json"
@@ -161,7 +178,7 @@ if { [[ "$method" == PUT && "$path" == /api/nginx/proxy-hosts/* ]] ||
    fi
   if [[ "$scenario" == verification-after-mutation-* && "$path" == "/api/nginx/proxy-hosts/7" && "$mutations" == 1 ]]; then
     printf 'api-mutated' > "$proxy_state_file"
-  elif [[ "$scenario" == verification-after-mutation-* && "$path" == "/api/nginx/proxy-hosts/7" && "$mutations" == 2 ]]; then
+   elif [[ "$scenario" == verification-after-mutation-* && "$path" == "/api/nginx/proxy-hosts/7" && ( "$mutations" == 2 || "$mutations" == 4 ) ]]; then
      printf 'api-restored' > "$proxy_state_file"
      printf '1' > "${state_file}.restore-verifications"
      : > "${state_file}.proxy-host-7-restored"
@@ -362,7 +379,9 @@ if [[ "$scenario" == transient && "$method" == GET && "$path" == /api/nginx/prox
   exit 0
 fi
 
-case "$scenario:$method:$path" in
+case_scenario="$scenario"
+[[ "$scenario" == tls-http-401 ]] && case_scenario=success
+case "$case_scenario:$method:$path" in
   *:POST:/api/tokens) printf '{"token":"mock-token"}\n200\n' ;;
   empty:GET:/api/nginx/certificates\?per_page=200|upload-failure:GET:/api/nginx/certificates\?per_page=200|custom-success:GET:/api/nginx/certificates\?per_page=200|custom-tls-failure:GET:/api/nginx/certificates\?per_page=200|custom-san-mismatch:GET:/api/nginx/certificates\?per_page=200|custom-expired:GET:/api/nginx/certificates\?per_page=200|custom-malformed:GET:/api/nginx/certificates\?per_page=200|custom-invalid:GET:/api/nginx/certificates\?per_page=200|le-invalid:GET:/api/nginx/certificates\?per_page=200|le-created-valid:GET:/api/nginx/certificates\?per_page=200|transient:GET:/api/nginx/certificates\?per_page=200) printf '[]\n200\n' ;;
   le-created-valid:POST:/api/nginx/certificates) if [[ -n "${CERT_CREATE_RESPONSE:-}" ]]; then printf '%s\n201\n' "$CERT_CREATE_RESPONSE"; else printf '{"id":42}\n201\n'; fi ;;
@@ -372,8 +391,8 @@ case "$scenario:$method:$path" in
   upload-failure:POST:/api/nginx/certificates) printf '{"id":99}\n201\n' ;;
   upload-failure:POST:/api/nginx/certificates/99/upload) printf '{"error":"mock upload failure"}\n500\n' ;;
   custom-success:POST:/api/nginx/certificates/99/upload|custom-tls-failure:POST:/api/nginx/certificates/99/upload|custom-san-mismatch:POST:/api/nginx/certificates/99/upload|custom-expired:POST:/api/nginx/certificates/99/upload|custom-malformed:POST:/api/nginx/certificates/99/upload) printf '{}\n200\n' ;;
-  success:GET:/api/nginx/certificates\?per_page=200|valid-status:GET:/api/nginx/certificates\?per_page=200|invalid-status:GET:/api/nginx/certificates\?per_page=200|hostname-mismatch:GET:/api/nginx/certificates\?per_page=200|expired:GET:/api/nginx/certificates\?per_page=200|tls-failure:GET:/api/nginx/certificates\?per_page=200|tls-hostname-mismatch:GET:/api/nginx/certificates\?per_page=200|proxy-host-failure:GET:/api/nginx/certificates\?per_page=200) printf '[{"id":42,"provider":"letsencrypt","domain_names":["nginx.example.test"]}]\n200\n' ;;
-  success:GET:/api/nginx/certificates/42|proxy-host-failure:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
+  success:GET:/api/nginx/certificates\?per_page=200|post-mutation-tls-reload:GET:/api/nginx/certificates\?per_page=200|valid-status:GET:/api/nginx/certificates\?per_page=200|invalid-status:GET:/api/nginx/certificates\?per_page=200|hostname-mismatch:GET:/api/nginx/certificates\?per_page=200|expired:GET:/api/nginx/certificates\?per_page=200|tls-failure:GET:/api/nginx/certificates\?per_page=200|tls-hostname-mismatch:GET:/api/nginx/certificates\?per_page=200|proxy-host-failure:GET:/api/nginx/certificates\?per_page=200) printf '[{"id":42,"provider":"letsencrypt","domain_names":["nginx.example.test"]}]\n200\n' ;;
+    success:GET:/api/nginx/certificates/42|post-mutation-tls-reload:GET:/api/nginx/certificates/42|proxy-host-failure:GET:/api/nginx/certificates/42|tls-failure:GET:/api/nginx/certificates/42|tls-hostname-mismatch:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
   custom-success:GET:/api/nginx/certificates/99|custom-tls-failure:GET:/api/nginx/certificates/99|custom-san-mismatch:GET:/api/nginx/certificates/99|custom-expired:GET:/api/nginx/certificates/99|custom-malformed:GET:/api/nginx/certificates/99) printf '{"id":99,"provider":"other","status":null,"domain_names":["example.test"],"expires_on":"2099-01-01 00:00:00"}\n200\n' ;;
   transient:GET:/api/nginx/certificates/99) printf '{"id":99,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
   le-created-valid:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
@@ -382,9 +401,9 @@ case "$scenario:$method:$path" in
   hostname-mismatch:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["other.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
   expired:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2020-01-01T00:00:00Z"}\n200\n' ;;
   tls-hostname-mismatch:GET:/api/nginx/certificates/42) printf '{"id":42,"provider":"letsencrypt","status":"issued","domain_names":["nginx.example.test"],"expires_on":"2099-01-01T00:00:00Z"}\n200\n' ;;
-      success:GET:/api/nginx/proxy-hosts\?per_page=200|custom-success:GET:/api/nginx/proxy-hosts\?per_page=200|custom-tls-failure:GET:/api/nginx/proxy-hosts\?per_page=200|custom-san-mismatch:GET:/api/nginx/proxy-hosts\?per_page=200|custom-expired:GET:/api/nginx/proxy-hosts\?per_page=200|custom-malformed:GET:/api/nginx/proxy-hosts\?per_page=200|le-created-valid:GET:/api/nginx/proxy-hosts\?per_page=200) printf '{"page":1,"per_page":200,"total":1,"data":[{"id":7,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":42,"ssl_forced":true,"hsts_enabled":true,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":true,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}] }\n200\n' ;;
-   success:GET:/api/nginx/proxy-hosts/7|custom-success:GET:/api/nginx/proxy-hosts/7|custom-san-mismatch:GET:/api/nginx/proxy-hosts/7|custom-expired:GET:/api/nginx/proxy-hosts/7|custom-malformed:GET:/api/nginx/proxy-hosts/7|le-created-valid:GET:/api/nginx/proxy-hosts/7) printf '{"id":7,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":42,"ssl_forced":true,"hsts_enabled":true,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":true,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}\n200\n' ;;
-   success:PUT:/api/nginx/proxy-hosts/7|custom-success:PUT:/api/nginx/proxy-hosts/7|custom-tls-failure:PUT:/api/nginx/proxy-hosts/7|custom-san-mismatch:PUT:/api/nginx/proxy-hosts/7|custom-expired:PUT:/api/nginx/proxy-hosts/7|custom-malformed:PUT:/api/nginx/proxy-hosts/7|le-created-valid:PUT:/api/nginx/proxy-hosts/7) printf '{}\n200\n' ;;
+      success:GET:/api/nginx/proxy-hosts\?per_page=200|post-mutation-tls-reload:GET:/api/nginx/proxy-hosts\?per_page=200|custom-success:GET:/api/nginx/proxy-hosts\?per_page=200|custom-tls-failure:GET:/api/nginx/proxy-hosts\?per_page=200|custom-san-mismatch:GET:/api/nginx/proxy-hosts\?per_page=200|custom-expired:GET:/api/nginx/proxy-hosts\?per_page=200|custom-malformed:GET:/api/nginx/proxy-hosts\?per_page=200|le-created-valid:GET:/api/nginx/proxy-hosts\?per_page=200|tls-failure:GET:/api/nginx/proxy-hosts\?per_page=200|tls-hostname-mismatch:GET:/api/nginx/proxy-hosts\?per_page=200) printf '{"page":1,"per_page":200,"total":1,"data":[{"id":7,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":42,"ssl_forced":true,"hsts_enabled":true,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":true,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}] }\n200\n' ;;
+      success:GET:/api/nginx/proxy-hosts/7|post-mutation-tls-reload:GET:/api/nginx/proxy-hosts/7|custom-success:GET:/api/nginx/proxy-hosts/7|custom-san-mismatch:GET:/api/nginx/proxy-hosts/7|custom-expired:GET:/api/nginx/proxy-hosts/7|custom-malformed:GET:/api/nginx/proxy-hosts/7|le-created-valid:GET:/api/nginx/proxy-hosts/7|tls-failure:GET:/api/nginx/proxy-hosts/7|tls-hostname-mismatch:GET:/api/nginx/proxy-hosts/7) printf '{"id":7,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":0,"ssl_forced":false,"hsts_enabled":false,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":false,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}\n200\n' ;;
+    success:PUT:/api/nginx/proxy-hosts/7|post-mutation-tls-reload:PUT:/api/nginx/proxy-hosts/7|custom-success:PUT:/api/nginx/proxy-hosts/7|custom-tls-failure:PUT:/api/nginx/proxy-hosts/7|custom-san-mismatch:PUT:/api/nginx/proxy-hosts/7|custom-expired:PUT:/api/nginx/proxy-hosts/7|custom-malformed:PUT:/api/nginx/proxy-hosts/7|le-created-valid:PUT:/api/nginx/proxy-hosts/7) printf '{}\n200\n' ;;
    transient:GET:/api/nginx/proxy-hosts\?per_page=200|proxy-host-failure:GET:/api/nginx/proxy-hosts\?per_page=200) printf '{"page":1,"per_page":200,"total":0,"data":[]}\n200\n' ;;
   transient:POST:/api/nginx/proxy-hosts) if [[ -n "${CREATE_RESPONSE:-}" ]]; then printf '%s\n201\n' "$CREATE_RESPONSE"; else printf '{"id":8}\n201\n'; fi ;;
    proxy-host-failure:POST:/api/nginx/proxy-hosts) printf '{"error":"mock proxy host failure"}\n500\n' ;;
@@ -417,7 +436,7 @@ run_bootstrap() {
       ;;
   esac
   case "$scenario" in
-    empty|success|valid-status|invalid-status|hostname-mismatch|expired|tls-failure|tls-hostname-mismatch|proxy-host-failure|issuance-after-mutation-main|verification-after-mutation-main|verification-after-mutation-san|verification-after-mutation-expired) tls_mode=letsencrypt ;;
+    empty|success|tls-http-401|post-mutation-tls-reload|valid-status|invalid-status|hostname-mismatch|expired|tls-failure|tls-hostname-mismatch|proxy-host-failure|issuance-after-mutation-main|verification-after-mutation-main|verification-after-mutation-san|verification-after-mutation-expired) tls_mode=letsencrypt ;;
     custom-success|custom-tls-failure|custom-san-mismatch|custom-expired|custom-malformed|custom-invalid) tls_mode=local ;;
     le-created-valid) tls_mode=letsencrypt ;;
     upload-failure) tls_mode=local ;;
@@ -598,6 +617,27 @@ run_expect_failure empty
 run_bootstrap success >"$TMP_DIR/success.out" 2>&1
 grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/success.out"
 grep -q 'NPM_BOOTSTRAP_TLS_RESULT=applied' "$TMP_DIR/success.out"
+metadata_line="$(grep -n 'GET /api/nginx/certificates/42' "$TMP_DIR/success.state.order" | cut -d: -f1)"
+host_read_line="$(grep -n 'GET /api/nginx/proxy-hosts/7' "$TMP_DIR/success.state.order" | cut -d: -f1)"
+mutation_line="$(grep -n 'PUT /api/nginx/proxy-hosts/7' "$TMP_DIR/success.state.order" | cut -d: -f1)"
+handshake_line="$(grep -n '^HTTPS ' "$TMP_DIR/success.state.order" | cut -d: -f1)"
+[[ "$metadata_line" -lt "$host_read_line" && "$host_read_line" -lt "$mutation_line" && "$mutation_line" -lt "$handshake_line" ]]
+jq -e '.certificate_id == 42 and .ssl_forced == true' \
+  "$TMP_DIR/success.state.proxy-host-7-put-1.json" >/dev/null
+
+# NPM can acknowledge the mutation before its generated Nginx configuration is
+# active.  A first SNI failure is retried, while the eventual successful probe
+# still uses normal certificate and hostname verification.
+run_bootstrap post-mutation-tls-reload >"$TMP_DIR/post-mutation-tls-reload.out" 2>&1
+grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/post-mutation-tls-reload.out"
+grep -q 'NPM TLS verification retry' "$TMP_DIR/post-mutation-tls-reload.out"
+[[ "$(<"$TMP_DIR/post-mutation-tls-reload.state.tls-probes")" == 2 ]]
+
+# A trusted TLS handshake succeeds even when the upstream application returns
+# HTTP 401; authorization status is not part of certificate verification.
+run_bootstrap tls-http-401 >"$TMP_DIR/tls-http-401.out" 2>&1
+grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/tls-http-401.out"
+grep -q 'NPM_BOOTSTRAP_TLS_RESULT=applied' "$TMP_DIR/tls-http-401.out"
 
 # Invalid status, hostname/SAN, expiry, or TLS handshake never produce false success.
 run_expect_failure invalid-status
@@ -629,8 +669,8 @@ done
 CERT_CREATE_RESPONSE='{ "id" : 42 }' run_bootstrap le-created-valid >"$TMP_DIR/le-created-valid.out" 2>&1
 grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/le-created-valid.out"
 run_expect_failure custom-tls-failure
-grep -q 'NPM_BOOTSTRAP_REASON=certificate_verification_failed_before_proxy_mutation' "$TMP_DIR/custom-tls-failure.out"
-[[ "$(<"$TMP_DIR/custom-tls-failure.state.mutations")" == 0 ]]
+grep -q 'NPM_BOOTSTRAP_REASON=certificate_verification_failed_proxy_hosts_restored' "$TMP_DIR/custom-tls-failure.out"
+[[ "$(<"$TMP_DIR/custom-tls-failure.state.mutations")" == 2 ]]
 
 # Certificate upload fails before proxy mutation: no host state changes, no
 # proxy rollback is needed, and the failure receipt remains non-zero/redacted.
@@ -699,17 +739,17 @@ if grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/verification-after-mutation-
   exit 1
 fi
 assert_no_fixture_secret "$TMP_DIR/verification-after-mutation-main.out"
-[[ "$(<"$TMP_DIR/verification-after-mutation-main.state.mutations")" == 2 ]]
+[[ "$(<"$TMP_DIR/verification-after-mutation-main.state.mutations")" == 4 ]]
 [[ "$(<"$TMP_DIR/verification-after-mutation-main.state.proxy-state")" == api-restored ]]
 [[ "$(<"$TMP_DIR/verification-after-mutation-main.state.restore-verifications")" == 1 ]]
 [[ "$(<"$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-rereads")" == 1 ]]
 [[ "$(<"$TMP_DIR/verification-after-mutation-main.state.proxy-host-reread-ids")" == $'7\n' ]]
 jq -e -s '.[0] == .[1]' \
   "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-original.json" \
-  "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-put-2.json" >/dev/null
+  "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-put-4.json" >/dev/null
 jq -e -s '.[0] == .[1]' \
   "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-reread.json" \
-  "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-put-2.json" >/dev/null
+  "$TMP_DIR/verification-after-mutation-main.state.proxy-host-7-put-4.json" >/dev/null
 
 # SAN and expiry failures on host B occur after host A has already been
 # mutated.  The mock records the real PUT bodies and serves those bodies on
@@ -738,13 +778,14 @@ for scenario in verification-after-mutation-san verification-after-mutation-expi
     "$state_file.proxy-host-7-put-2.json" >/dev/null
 done
 
-# Certificate verification before the first proxy mutation keeps the original
-# pre-mutation failure boundary and does not retain rollback diagnostics.
+# A trusted handshake failure after the first proxy mutation uses the
+# compensating rollback path and never claims a pre-mutation failure.
 run_expect_failure tls-failure
-grep -q 'NPM_BOOTSTRAP_REASON=certificate_verification_failed_before_proxy_mutation' "$TMP_DIR/tls-failure.out"
-[[ "$(<"$TMP_DIR/tls-failure.state.mutations")" == 0 ]]
-if grep -q 'proxy_hosts_restored\|NPM_BOOTSTRAP_ROLLBACK_DIAGNOSTIC_DIR=' "$TMP_DIR/tls-failure.out"; then
-  printf 'Pre-mutation verification failure entered proxy rollback\n' >&2
+grep -q 'NPM_BOOTSTRAP_REASON=certificate_verification_failed_proxy_hosts_restored' "$TMP_DIR/tls-failure.out"
+[[ "$(<"$TMP_DIR/tls-failure.state.mutations")" == 2 ]]
+[[ "$(<"$TMP_DIR/tls-failure.state.proxy-state")" == api-restored ]]
+if grep -q 'NPM_BOOTSTRAP_STATUS=SUCCESS' "$TMP_DIR/tls-failure.out"; then
+  printf 'Permanent TLS failure emitted a success receipt\n' >&2
   exit 1
 fi
 
@@ -1472,13 +1513,13 @@ PATH="$MOCK_BIN:$PATH" \
     [[ "$CREATE_ATTEMPTS" == 0 ]]
   ' _ "$SCRIPT"
 
-# Detail verification checks the returned top-level ID before provider,
-# status, domain, expiry, or TLS verification.
+# Certificate metadata verification checks the returned top-level ID before
+# provider, status, domain, or expiry.
   PATH="$MOCK_BIN:$PATH" \
   bash -c '
     source "$1"
     api_get() { printf "{\"id\":43,\"provider\":\"letsencrypt\",\"status\":\"issued\",\"domain_names\":[\"nginx.example.test\"],\"expires_on\":\"2099-01-01T00:00:00Z\"}"; }
-    ! verify_certificate_for_domain 42 nginx.example.test
+     ! verify_certificate_metadata_for_domain 42 nginx.example.test
   ' _ "$SCRIPT"
 
 printf 'NPM bootstrap resilience mock tests passed\n'

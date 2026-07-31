@@ -1,8 +1,43 @@
-# Apply certificates
+# Certificate lifecycle
+
+## Apply
 
 ```bash
 bash apply-certs.sh
 ```
+
+Apply completes NPM certificate setup, updates managed proxy hosts, verifies TLS,
+then projects public URLs into `.env` and Vault before invoking
+`update-daiana.sh --update`. The update recreates/redeploys the installer app
+stack, including Supabase and URL-consuming Daiana services.
+
+The projection is explicit: `*.nip.io` uses `http` for the installer IP-DNS
+mode; other configured domains use `https` after certificate verification.
+Internal Docker URLs are never rewritten.
+
+## Removal
+
+Removal is a separate, noninteractive operation and fails closed without
+explicit confirmation:
+
+```bash
+bash remove-certs.sh --confirm
+bash remove-certs.sh --confirm --certificate-id=4
+bash remove-certs.sh --confirm --all-managed
+```
+
+It first detaches TLS from every managed NPM proxy host and confirms
+`certificate_id=0`, forced HTTPS off, HSTS off, and HTTP/2 off. Only after that
+ does it stage the domain-aware projection (HTTP for `nip.io`, HTTPS otherwise), update `.env` and Vault with compensation,
+and invoke `update-daiana.sh --update` so Supabase Auth/Studio/Storage/
+Functions/Kong and URL-consuming Daiana services consume the new values.
+
+Certificate records are not deleted by default. `--certificate-id` selects one
+record; `--all-managed` selects all records captured from managed hosts.
+Each candidate is validated for positive ID, provider, name, and domains, is
+refused while referenced by any proxy host, and is accepted only after an exact
+NPM `404` reread. For Let's Encrypt this deletes the NPM record; it does **not**
+revoke the certificate at the ACME CA.
 
 ## Modes
 1. Let’s Encrypt
@@ -14,10 +49,9 @@ bash apply-certs.sh
 - does not create proxy hosts
 - updates existing NPM hosts for `port.$BASE_DOMAIN` and `nginx.$BASE_DOMAIN`
 - after every intended host passes TLS verification, refreshes the documented
-  public URL variables in `.env` from `http` to `https`, including `nip.io`
-  hosts; internal Docker URLs, healthchecks, upstreams, and database URLs are
-  never rewritten
-- stages and validates the complete public HTTPS URL set before replacing
+  public URL variables in `.env` using the domain/TLS projection above; internal
+  Docker URLs, healthchecks, upstreams, and database URLs are never rewritten
+- stages and validates the complete public URL set before replacing
   `.env`, upserts the matching values in one Vault transaction, then refreshes
   Portainer stacks
 - auto-generates local/self-signed cert files when `TLS_MODE=local` and the files are missing

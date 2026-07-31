@@ -367,7 +367,7 @@ fi
 [ "$bootstrap_status" -eq 0 ] || exit "$bootstrap_status"
 
 if [[ -z "${ONLY_PREFIX:-}" && "$TLS_MODE" != "none" ]]; then
-  log "Refreshing persisted public URLs in .env to https after complete TLS verification"
+   log "Refreshing persisted public URLs in .env according to the configured domain/TLS projection after complete verification"
   refresh_public_urls_in_env || die "Could not derive an unambiguous public URL set; refusing env/Vault mutation"
   log "Refreshing Portainer stacks after the env and Vault update"
   if ! bash update-daiana.sh --update; then

@@ -6,6 +6,8 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 source "$ROOT_DIR/utils/public-url-propagation.sh"
+export ROOT_DIR
+[[ "$(sql_string_literal "https://example.test/a'b")" == "'https://example.test/a''b'" ]]
 
 # Rollback PUTs use the projection, never GET metadata or runtime fields.
 # shellcheck disable=SC1091
@@ -32,7 +34,9 @@ public_url_key API_EXTERNAL_URL
 if public_url_key POSTGRES_URL; then exit 1; fi
 if public_url_key NPM_API_URL; then exit 1; fi
 BASE_DOMAIN=192.168.0.19.nip.io
-[[ "$(public_url_value_for_key SITE_URL)" == https://daiana.192.168.0.19.nip.io ]]
+[[ "$(public_url_scheme)" == http ]]
+[[ "$(public_url_value_for_key SITE_URL)" == http://daiana.192.168.0.19.nip.io ]]
+[[ "$(public_url_value_for_key SITE_URL https)" == https://daiana.192.168.0.19.nip.io ]]
 
 cat > "$TMP_DIR/.env" <<'ENV'
 SUPABASE_PUBLIC_URL=http://supa.192.168.0.19.nip.io
@@ -62,9 +66,9 @@ export QDRANT_BASE_URL=https://qdrant.192.168.0.19.nip.io
 export CORS_ALLOW_ORIGIN=https://daiana.192.168.0.19.nip.io
 export NEXT_PUBLIC_APP_URL=https://daiana.192.168.0.19.nip.io
 rewrite_public_urls_in_env "$TMP_DIR/.env"
-grep -q '^SUPABASE_PUBLIC_URL=https://' "$TMP_DIR/.env"
-grep -q '^API_EXTERNAL_URL=https://' "$TMP_DIR/.env"
-grep -q '^BACKEND_BASE_URL=https://' "$TMP_DIR/.env"
+grep -q '^SUPABASE_PUBLIC_URL=http://' "$TMP_DIR/.env"
+grep -q '^API_EXTERNAL_URL=http://' "$TMP_DIR/.env"
+grep -q '^BACKEND_BASE_URL=http://' "$TMP_DIR/.env"
 grep -q '^INTERNAL_API_URL=http://daiana-python:5002$' "$TMP_DIR/.env"
 
 # Public assignments are atomic inputs: comments are harmless, but duplicate,
@@ -85,35 +89,24 @@ if validate_public_source_env_file "$TMP_DIR/.env.malformed"; then exit 1; fi
 mkdir -p "$TMP_DIR/bin"
 cat > "$TMP_DIR/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
-if [[ "${1:-}" != compose || "${2:-}" != exec || "${3:-}" != -T || "${4:-}" != db ]]; then
-  printf 'Vault SQL must target Compose service db\n' >&2
-  exit 97
-fi
-[[ "${5:-}" == sh && "${6:-}" == -c ]] || exit 98
+for expected in compose --project-name daiana-app --project-directory "$ROOT_DIR" \
+  -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/docker-compose.app.yml" exec -T db sh -c; do
+  [[ "${1:-}" == "$expected" ]] || {
+    printf 'Vault SQL must target the daiana-app Compose db service with explicit project files\n' >&2
+    exit 97
+  }
+  shift
+done
 IFS= read -r _password || exit 99
 sql=''
-parameter_count=0
-shift 7
+shift 2
 while (($#)); do
   case "$1" in
     -v)
       assignment="${2:-}"
       parameter="${assignment%%=*}"
       value="${assignment#*=}"
-      case "$parameter=$value" in
-        ON_ERROR_STOP=1) ;;
-        public_supabase_url=https://supa.192.168.0.19.nip.io|\
-        public_api_python=https://api.192.168.0.19.nip.io|\
-        public_api_training=https://vanna.192.168.0.19.nip.io|\
-        public_api_qdrant=https://qdrant.192.168.0.19.nip.io|\
-        public_api_msteams=https://msteams.192.168.0.19.nip.io|\
-        public_api_whatsapp=https://whatsapp.192.168.0.19.nip.io|\
-        public_api_studio=https://studio.192.168.0.19.nip.io|\
-        public_webui=https://webui.192.168.0.19.nip.io|\
-        public_app=https://daiana.192.168.0.19.nip.io)
-          parameter_count=$((parameter_count + 1)) ;;
-        *) exit 110 ;;
-      esac
+      [[ "$parameter=$value" == ON_ERROR_STOP=1 ]] || exit 110
       shift 2
       ;;
     -c)
@@ -124,7 +117,6 @@ while (($#)); do
   esac
 done
 [[ -n "$sql" ]] || exit 100
-[[ "$parameter_count" == 9 ]] || exit 111
 printf '%s\n' "$sql" > "${VAULT_MOCK_LOG:?}"
 [[ "$sql" != *'$('* ]] || exit 102
 [[ "$sql" == *"WITH expected(name, value) AS (VALUES"* ]] || exit 103
@@ -134,33 +126,54 @@ printf '%s\n' "$sql" > "${VAULT_MOCK_LOG:?}"
 [[ "$sql" == *"DO \$\$"* ]] || exit 112
 [[ "$sql" == *"RAISE EXCEPTION"* ]] || exit 113
 [[ "$sql" != *"ELSE 1 / 0"* ]] || exit 114
-[[ "$sql" != *"https://supa.192.168.0.19.nip.io"* ]] || exit 115
+[[ "$sql" == *"http://supa.192.168.0.19.nip.io"* ]] || exit 115
+[[ "$sql" != *":'public_"* ]] || exit 118
 [[ "$sql" == BEGIN\;* ]] || exit 116
 [[ "$sql" == *COMMIT\; ]] || exit 117
-for parameter in public_supabase_url public_api_python public_api_training public_api_qdrant \
-  public_api_msteams public_api_whatsapp public_api_studio public_webui public_app; do
-  [[ "$sql" == *":'$parameter'"* ]] || exit 107
-done
 [[ "$sql" == *"SELECT public.vault_upsert_secret"* ]] || exit 108
 [[ "${sql//SELECT public.vault_upsert_secret/}" != "$sql" ]] || exit 109
 MOCK
 chmod +x "$TMP_DIR/bin/docker"
+cat > "$TMP_DIR/bin/psql" <<'PSQL'
+#!/usr/bin/env bash
+set -euo pipefail
+sql=''
+while (($#)); do
+  case "$1" in
+    -c) sql="${2:-}"; shift 2 ;;
+    -v) shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [[ -n "$sql" ]]; then
+  [[ "$sql" != *':test'* ]] && exit 0
+  exit 2
+fi
+IFS= read -r sql
+[[ "$sql" == 'select :test' ]]
+PSQL
+chmod +x "$TMP_DIR/bin/psql"
 export PATH="$TMP_DIR/bin:$PATH" VAULT_MOCK_LOG="$TMP_DIR/vault.args"
+# Regression fixture: psql expands variables from stdin, but not in -c SQL.
+if psql -v test=ok -c 'select :test'; then exit 1; fi
+printf '%s\n' 'select :test' | psql -v test=ok
 BASE_DOMAIN=192.168.0.19.nip.io
-export SUPABASE_PUBLIC_URL=https://supa.192.168.0.19.nip.io
-export BACKEND_BASE_URL=https://api.192.168.0.19.nip.io
-export VANNA_BASE_URL=https://vanna.192.168.0.19.nip.io
-export QDRANT_BASE_URL=https://qdrant.192.168.0.19.nip.io
-export MS_BASE_URL=https://msteams.192.168.0.19.nip.io
-export WS_BASE_URL=https://whatsapp.192.168.0.19.nip.io
-export STUDIO_BASE_URL=https://studio.192.168.0.19.nip.io
-export WEBUI_BASE_URL=https://webui.192.168.0.19.nip.io
-export NEXT_PUBLIC_APP_URL=https://daiana.192.168.0.19.nip.io
+export SUPABASE_PUBLIC_URL=http://supa.192.168.0.19.nip.io
+export BACKEND_BASE_URL=http://api.192.168.0.19.nip.io
+export VANNA_BASE_URL=http://vanna.192.168.0.19.nip.io
+export QDRANT_BASE_URL=http://qdrant.192.168.0.19.nip.io
+export MS_BASE_URL=http://msteams.192.168.0.19.nip.io
+export WS_BASE_URL=http://whatsapp.192.168.0.19.nip.io
+export STUDIO_BASE_URL=http://studio.192.168.0.19.nip.io
+export WEBUI_BASE_URL=http://webui.192.168.0.19.nip.io
+export NEXT_PUBLIC_APP_URL=http://daiana.192.168.0.19.nip.io
 POSTGRES_PASSWORD=redacted-secret
+unset DAIANA_COMPOSE_PROJECT_NAME
 vault_output="$(vault_upsert_public_url_entries "$TMP_DIR/.env" 2>&1)"
 [[ -z "$vault_output" ]]
 grep -q 'NEXT_PUBLIC_SUPABASE_URL' "$TMP_DIR/vault.args"
-grep -q ":'public_supabase_url'" "$TMP_DIR/vault.args"
+grep -q "'http://supa.192.168.0.19.nip.io'" "$TMP_DIR/vault.args"
+if grep -q "public_supabase_url" "$TMP_DIR/vault.args"; then exit 1; fi
 if grep -q 'supabase-db' "$TMP_DIR/vault.args"; then exit 1; fi
 if grep -q 'https://supa.192.168.0.19.nip.io' "$TMP_DIR/vault.args"; then exit 1; fi
 if grep -q 'redacted-secret' "$TMP_DIR/vault.args"; then exit 1; fi
@@ -169,6 +182,15 @@ if grep -q 'PGPASSWORD.*POSTGRES_PASSWORD' "$ROOT_DIR/utils/public-url-propagati
   printf 'Vault password must not be constructed in docker argv\n' >&2
   exit 1
 fi
+
+# The installer-managed Compose project is fixed by repository convention; a
+# mismatched environment value must fail before Docker or Vault is reached.
+export DAIANA_COMPOSE_PROJECT_NAME=unsafe-project
+if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+  printf 'Unsafe Compose project override must fail closed\n' >&2
+  exit 1
+fi
+unset DAIANA_COMPOSE_PROJECT_NAME
 
 # Ambiguous derivation fails before any rewrite; failed/partial TLS callers are
 # represented by the apply-certs guard and must not invoke this helper.
@@ -246,39 +268,33 @@ NEXT_PUBLIC_APP_URL	http://daiana.192.168.0.19.nip.io
 HTTP_STATE
 
 vault_psql_with_password() {
-  local sql='' assignment parameter value
-  local -a values=()
+  local sql='' assignment parameter value name parsed_value
   while (($#)); do
     case "$1" in
       -Atqc) printf '%s\n' "$(<"$MOCK_DB_FILE")"; return 0 ;;
       -c) sql="$2"; shift 2 ;;
       -v)
         assignment="$2"; parameter="${assignment%%=*}"; value="${assignment#*=}"
-        case "$parameter" in
-          restore_*) values[${parameter#restore_}]="$value" ;;
-          verify_*) values[${parameter#verify_}]="$value" ;;
-        esac
+        [[ "$parameter=$value" == ON_ERROR_STOP=1 ]] || return 1
         shift 2 ;;
       *) shift ;;
     esac
   done
   [[ "$sql" == BEGIN\;* && "$sql" == *$'\n'COMMIT\; ]]
-  [[ "$sql" == *$'\n'* && "$sql" != *'\n'* && "$sql" == *'DO $$'* && "$sql" == *'RAISE EXCEPTION'* ]]
-  if ((${#values[@]})); then
-    if [[ "$sql" == *"restore_"* ]]; then
-      : > "$MOCK_DB_FILE"
-      local i
-      for i in {1..9}; do
-        printf '%s\t%s\n' "${PUBLIC_URL_VAULT_NAMES[i-1]}" "${values[i]}" >> "$MOCK_DB_FILE"
-      done
-    else
-      local i actual expected
-      for i in {1..9}; do
-        actual="$(awk -F '\t' -v key="${PUBLIC_URL_VAULT_NAMES[i-1]}" '$1 == key { print $2 }' "$MOCK_DB_FILE")"
-        expected="${values[i]:-}"
-        [[ -n "$actual" && "$actual" == "$expected" ]] || return 1
-      done
-    fi
+  [[ "$sql" == *'DO $$'* && "$sql" == *'RAISE EXCEPTION'* ]]
+  if [[ "$sql" == *"vault_upsert_secret"* ]]; then
+    : > "$MOCK_DB_FILE"
+    while IFS=$'\t' read -r name parsed_value; do
+      [[ -n "$name" && -n "$parsed_value" ]] || continue
+      printf '%s\t%s\n' "$name" "$parsed_value" >> "$MOCK_DB_FILE"
+    done < <(printf '%s\n' "$sql" | sed -nE "s/.*vault_upsert_secret\\('([^']*)', '([^']*)'.*/\\2\\t\\1/p")
+  else
+    local actual expected
+    while IFS=$'\t' read -r name expected; do
+      [[ -n "$name" && -n "$expected" ]] || continue
+      actual="$(awk -F '\t' -v key="$name" '$1 == key { print $2 }' "$MOCK_DB_FILE")"
+      [[ -n "$actual" && "$actual" == "$expected" ]] || return 1
+    done < <(printf '%s\n' "$sql" | sed -nE "s/.*\\('([^']*)', '([^']*)'\\).*/\\1\\t\\2/p")
   fi
 }
 
