@@ -13,29 +13,29 @@ cat > "$TMP_DIR/.env" <<'ENV'
 BASE_DOMAIN=192.168.0.19.nip.io
 NPM_ADMIN_EMAIL=test@example.test
 NPM_ADMIN_PASS=redacted-secret
-STUDIO_BASE_URL=http://studio.192.168.0.19.nip.io
-SUPABASE_PUBLIC_URL=http://supa.192.168.0.19.nip.io
-API_EXTERNAL_URL=http://supa.192.168.0.19.nip.io/auth/v1
-SITE_URL=http://daiana.192.168.0.19.nip.io
-WEBUI_BASE_URL=http://webui.192.168.0.19.nip.io
-BACKEND_BASE_URL=http://api.192.168.0.19.nip.io
-WS_BASE_URL=http://whatsapp.192.168.0.19.nip.io
-MS_BASE_URL=http://msteams.192.168.0.19.nip.io
-VANNA_BASE_URL=http://vanna.192.168.0.19.nip.io
-QDRANT_BASE_URL=http://qdrant.192.168.0.19.nip.io
-CORS_ALLOW_ORIGIN=http://daiana.192.168.0.19.nip.io
-NEXT_PUBLIC_APP_URL=http://daiana.192.168.0.19.nip.io
+STUDIO_BASE_URL=https://studio.192.168.0.19.nip.io
+SUPABASE_PUBLIC_URL=https://supa.192.168.0.19.nip.io
+API_EXTERNAL_URL=https://supa.192.168.0.19.nip.io/auth/v1
+SITE_URL=https://daiana.192.168.0.19.nip.io
+WEBUI_BASE_URL=https://webui.192.168.0.19.nip.io
+BACKEND_BASE_URL=https://api.192.168.0.19.nip.io
+WS_BASE_URL=https://whatsapp.192.168.0.19.nip.io
+MS_BASE_URL=https://msteams.192.168.0.19.nip.io
+VANNA_BASE_URL=https://vanna.192.168.0.19.nip.io
+QDRANT_BASE_URL=https://qdrant.192.168.0.19.nip.io
+CORS_ALLOW_ORIGIN=https://daiana.192.168.0.19.nip.io
+NEXT_PUBLIC_APP_URL=https://daiana.192.168.0.19.nip.io
 ENV
 cat > "$TMP_DIR/vault.db" <<'VAULT'
-NEXT_PUBLIC_SUPABASE_URL	http://supa.192.168.0.19.nip.io
-NEXT_PUBLIC_API_PYTHON	http://api.192.168.0.19.nip.io
-NEXT_PUBLIC_API_TRAINING	http://vanna.192.168.0.19.nip.io
-NEXT_PUBLIC_API_QDRANT	http://qdrant.192.168.0.19.nip.io
-NEXT_PUBLIC_API_MSTEAMS	http://msteams.192.168.0.19.nip.io
-NEXT_PUBLIC_API_WHATSAPP	http://whatsapp.192.168.0.19.nip.io
-NEXT_PUBLIC_API_STUDIO_BASE_URL	http://studio.192.168.0.19.nip.io
-NEXT_PUBLIC_WEBUI_URL	http://webui.192.168.0.19.nip.io
-NEXT_PUBLIC_APP_URL	http://daiana.192.168.0.19.nip.io
+NEXT_PUBLIC_SUPABASE_URL	https://supa.192.168.0.19.nip.io
+NEXT_PUBLIC_API_PYTHON	https://api.192.168.0.19.nip.io
+NEXT_PUBLIC_API_TRAINING	https://vanna.192.168.0.19.nip.io
+NEXT_PUBLIC_API_QDRANT	https://qdrant.192.168.0.19.nip.io
+NEXT_PUBLIC_API_MSTEAMS	https://msteams.192.168.0.19.nip.io
+NEXT_PUBLIC_API_WHATSAPP	https://whatsapp.192.168.0.19.nip.io
+NEXT_PUBLIC_API_STUDIO_BASE_URL	https://studio.192.168.0.19.nip.io
+NEXT_PUBLIC_WEBUI_URL	https://webui.192.168.0.19.nip.io
+NEXT_PUBLIC_APP_URL	https://daiana.192.168.0.19.nip.io
 VAULT
 
 cat > "$TMP_DIR/npm-hosts.json" <<'HOSTS'

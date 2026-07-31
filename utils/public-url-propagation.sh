@@ -117,7 +117,7 @@ validate_public_env_file() {
   local env_file="$1" expected_file key actual expected status=0 scheme="${2:-}"
   [[ -n "$scheme" ]] || scheme="$(public_url_scheme)" || return 1
   [[ -f "$env_file" ]] || return 1
-  validate_public_env_structure "$env_file" || return 1
+  validate_public_env_structure "$env_file" "$scheme" || return 1
   expected_file="$(mktemp "${TMPDIR:-/tmp}/public-url-expected.XXXXXX")" || return 1
   if ! public_url_expected_values "$scheme" > "$expected_file"; then
     rm -f "$expected_file"
@@ -208,12 +208,15 @@ sql_string_literal() {
 }
 
 vault_upsert_public_url_entries() {
-  local env_file="${1:-.env}" sql scheme
+  local env_file="${1:-.env}" scheme="${2:-}" sql
   local public_supabase_url public_api_python public_api_training public_api_qdrant
   local public_api_msteams public_api_whatsapp public_api_studio public_webui public_app
   command -v docker >/dev/null 2>&1 || return 1
   [[ -n "${POSTGRES_PASSWORD:-}" ]] || return 1
-  scheme="$(public_url_scheme)" || return 1
+  case "$scheme" in
+    http|https) ;;
+    *) return 1 ;;
+  esac
   validate_public_env_file "$env_file" "$scheme" || return 1
   public_supabase_url="$(env_value "$env_file" SUPABASE_PUBLIC_URL)" || return 1
   public_api_python="$(env_value "$env_file" BACKEND_BASE_URL)" || return 1

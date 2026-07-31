@@ -200,8 +200,8 @@ persist_env_value() {
 }
 
 refresh_public_urls_in_env() {
-  local stage backup vault_snapshot vault_scheme
-  stage="$(stage_public_env_update .env)" || return 1
+  local stage backup vault_snapshot vault_scheme scheme=https
+  stage="$(stage_public_env_update .env "$scheme")" || return 1
   backup="$(mktemp .env.rollback.XXXXXX)" || { rm -f "$stage"; return 1; }
   cp -p .env "$backup" || { rm -f "$stage" "$backup"; return 1; }
   vault_snapshot="$(mktemp .vault-public.rollback.XXXXXX)" || { rm -f "$stage" "$backup"; return 1; }
@@ -218,7 +218,7 @@ refresh_public_urls_in_env() {
     return 1
   fi
   load_dotenv .env
-  if ! vault_upsert_public_url_entries .env; then
+  if ! vault_upsert_public_url_entries .env "$scheme"; then
     local compensation_failed=0
     printf '%s\n' 'ERROR: Vault update failed; compensating .env and Vault from retained snapshots' >&2
     if ! vault_restore_public_url_entries "$vault_snapshot" || ! vault_verify_public_url_entries "$vault_snapshot" "$vault_scheme"; then

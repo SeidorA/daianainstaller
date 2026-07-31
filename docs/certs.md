@@ -11,9 +11,11 @@ then projects public URLs into `.env` and Vault before invoking
 `update-daiana.sh --update`. The update recreates/redeploys the installer app
 stack, including Supabase and URL-consuming Daiana services.
 
-The projection is explicit: `*.nip.io` uses `http` for the installer IP-DNS
-mode; other configured domains use `https` after certificate verification.
-Internal Docker URLs are never rewritten.
+The lifecycle has three explicit URL states: initial installation uses `http`
+for `*.nip.io` IP-DNS domains, applying any certificate switches all public
+URLs to `https` (including `*.nip.io`), and removing certificates switches
+them back to `http`. Other configured domains use `https` after installation
+and certificate application. Internal Docker URLs are never rewritten.
 
 ## Removal
 
@@ -28,7 +30,7 @@ bash remove-certs.sh --confirm --all-managed
 
 It first detaches TLS from every managed NPM proxy host and confirms
 `certificate_id=0`, forced HTTPS off, HSTS off, and HTTP/2 off. Only after that
- does it stage the domain-aware projection (HTTP for `nip.io`, HTTPS otherwise), update `.env` and Vault with compensation,
+does it stage the explicit `http` projection, update `.env` and Vault with compensation,
 and invoke `update-daiana.sh --update` so Supabase Auth/Studio/Storage/
 Functions/Kong and URL-consuming Daiana services consume the new values.
 
@@ -49,7 +51,7 @@ revoke the certificate at the ACME CA.
 - does not create proxy hosts
 - updates existing NPM hosts for `port.$BASE_DOMAIN` and `nginx.$BASE_DOMAIN`
 - after every intended host passes TLS verification, refreshes the documented
-  public URL variables in `.env` using the domain/TLS projection above; internal
+  public URL variables in `.env` using the lifecycle projection above; internal
   Docker URLs, healthchecks, upstreams, and database URLs are never rewritten
 - stages and validates the complete public URL set before replacing
   `.env`, upserts the matching values in one Vault transaction, then refreshes

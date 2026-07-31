@@ -157,7 +157,10 @@ ONLY_PREFIX=qdrant TLS_MODE=letsencrypt bash apply-certs.sh
 
 This is useful when one host failed but others already have certificates. The script reuses an existing certificate when NPM already has one for that domain.
 
-For non-`nip.io` domains, `apply-certs.sh` also refreshes persisted public URLs in `.env` to `https` and refreshes Portainer stacks.
+The URL lifecycle is explicit: initial `*.nip.io` installation uses `http`,
+`apply-certs.sh` switches all public URLs to `https` (including `*.nip.io`),
+and `remove-certs.sh` switches them back to `http` before refreshing Portainer
+stacks.
 
 ## 7. Verify after install
 
@@ -310,5 +313,5 @@ sh run.sh secrets
 - [ ] `sh run.sh secrets` prints credentials.
 - [ ] NPM proxy hosts exist.
 - [ ] Certificates were applied to required hosts.
-- [ ] Public URLs use `https` for non-`nip.io` domains.
+- [ ] Public URLs match the lifecycle state: initial `*.nip.io` is `http`, after apply it is `https`, and after removal it is `http` again.
 - [ ] Auth settings return enabled providers with an `apikey` header.

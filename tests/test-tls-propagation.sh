@@ -169,7 +169,7 @@ export WEBUI_BASE_URL=http://webui.192.168.0.19.nip.io
 export NEXT_PUBLIC_APP_URL=http://daiana.192.168.0.19.nip.io
 POSTGRES_PASSWORD=redacted-secret
 unset DAIANA_COMPOSE_PROJECT_NAME
-vault_output="$(vault_upsert_public_url_entries "$TMP_DIR/.env" 2>&1)"
+vault_output="$(vault_upsert_public_url_entries "$TMP_DIR/.env" http 2>&1)"
 [[ -z "$vault_output" ]]
 grep -q 'NEXT_PUBLIC_SUPABASE_URL' "$TMP_DIR/vault.args"
 grep -q "'http://supa.192.168.0.19.nip.io'" "$TMP_DIR/vault.args"
@@ -186,7 +186,7 @@ fi
 # The installer-managed Compose project is fixed by repository convention; a
 # mismatched environment value must fail before Docker or Vault is reached.
 export DAIANA_COMPOSE_PROJECT_NAME=unsafe-project
-if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+if vault_upsert_public_url_entries "$TMP_DIR/.env" http; then
   printf 'Unsafe Compose project override must fail closed\n' >&2
   exit 1
 fi
@@ -209,7 +209,7 @@ if rewrite_public_urls_in_env "$TMP_DIR/.env"; then
   printf 'Ambiguous public URL derivation must fail closed\n' >&2
   exit 1
 fi
-if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+if vault_upsert_public_url_entries "$TMP_DIR/.env" http; then
   printf 'Invalid BASE_DOMAIN must not reach Vault\n' >&2
   exit 1
 fi
@@ -222,7 +222,7 @@ if validate_public_url_set; then
   printf 'Conflicting derived public URL must fail closed\n' >&2
   exit 1
 fi
-if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+if vault_upsert_public_url_entries "$TMP_DIR/.env" http; then
   printf 'Conflicting public URL must not reach Vault\n' >&2
   exit 1
 fi
@@ -235,7 +235,7 @@ if validate_public_url_set; then
   printf 'Missing derived public URL must fail closed\n' >&2
   exit 1
 fi
-if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+if vault_upsert_public_url_entries "$TMP_DIR/.env" http; then
   printf 'Missing public URL must not reach Vault\n' >&2
   exit 1
 fi
@@ -245,7 +245,7 @@ cmp -s "$TMP_DIR/.env.before-invalid" "$TMP_DIR/.env"
 sed 's#^API_EXTERNAL_URL=.*#API_EXTERNAL_URL=https://supa.192.168.0.19.nip.io/invalid path#' \
   "$TMP_DIR/.env.before-invalid" > "$TMP_DIR/.env.invalid-path"
 mv "$TMP_DIR/.env.invalid-path" "$TMP_DIR/.env"
-if vault_upsert_public_url_entries "$TMP_DIR/.env"; then
+if vault_upsert_public_url_entries "$TMP_DIR/.env" http; then
   printf 'Invalid URL path must not reach Vault\n' >&2
   exit 1
 fi
