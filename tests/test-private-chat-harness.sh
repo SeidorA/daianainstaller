@@ -202,6 +202,8 @@ case "${1:-}" in
          else printf 'sha256:%064d\n' 2; fi
      elif [[ "${4:-}" == *'{{.Id}}'* ]]; then printf '%s-%s-id\n' "$state" "$container"
      elif [[ "${4:-}" == *Config.Labels* ]]; then printf '{}\n'
+     elif [[ "${4:-}" == *Mounts* ]]; then printf '[]\n'
+     elif [[ "${4:-}" == *HostConfig.NetworkMode* ]]; then printf 'default\n'
      elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
     else printf 'container-id\n'; fi
     exit ;;

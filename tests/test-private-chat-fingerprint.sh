@@ -16,7 +16,7 @@ if [[ "${4:-}" == *Config.Env* ]]; then
 elif [[ "${4:-}" == *Config.Labels* ]]; then
   printf '%s' "${FP_LABELS:?}"
 elif [[ "${4:-}" == *Mounts* ]]; then
-  printf '%s\n' '|[]|default'
+  printf '%s' "${FP_MOUNTS:?}"
 else
   printf '%s\n' 'local/image|/work|[]|[]|'
 fi
@@ -36,6 +36,8 @@ FP_ENV='["A=line1\\nline2=equals","B=stable"]'
 export FP_ENV
 FP_LABELS='{"com.docker.compose.config-hash":"hash-a","com.docker.compose.replace":"container-a","com.example.owner":"harness"}'
 export FP_LABELS
+FP_MOUNTS='[{"Type":"bind","Source":"/srv/app","Destination":"/app","Mode":"ro","RW":false,"Propagation":"rprivate","Name":"noise-a"}]'
+export FP_MOUNTS
 first="$(safe_config_fingerprint app)"
 second="$(safe_config_fingerprint app)"
 [[ "$first" == "$second" ]] || { printf 'fingerprint is not deterministic\n' >&2; exit 1; }
@@ -44,6 +46,22 @@ FP_LABELS='{"com.docker.compose.config-hash":"hash-b","com.docker.compose.replac
 export FP_LABELS
 lifecycle_changed="$(safe_config_fingerprint app)"
 [[ "$lifecycle_changed" == "$first" ]] || { printf 'Compose lifecycle label mutation changed the fingerprint\n' >&2; exit 1; }
+
+FP_MOUNTS='[{"Type":"bind","Source":"/srv/app","Destination":"/app","Mode":"ro","RW":true,"Propagation":"shared","Name":"noise-b","Driver":"local"}]'
+mount_metadata_changed="$(safe_config_fingerprint app)"
+[[ "$mount_metadata_changed" == "$first" ]] || { printf 'Docker mount metadata noise changed the fingerprint\n' >&2; exit 1; }
+
+for mount_field in Type Source Destination Mode; do
+  FP_MOUNTS='[{"Type":"bind","Source":"/srv/app","Destination":"/app","Mode":"ro"}]'
+  case "$mount_field" in
+    Type) FP_MOUNTS='[{"Type":"volume","Source":"/srv/app","Destination":"/app","Mode":"ro"}]' ;;
+    Source) FP_MOUNTS='[{"Type":"bind","Source":"/srv/other","Destination":"/app","Mode":"ro"}]' ;;
+    Destination) FP_MOUNTS='[{"Type":"bind","Source":"/srv/app","Destination":"/other","Mode":"ro"}]' ;;
+    Mode) FP_MOUNTS='[{"Type":"bind","Source":"/srv/app","Destination":"/app","Mode":"rw"}]' ;;
+  esac
+  export FP_MOUNTS
+  [[ "$(safe_config_fingerprint app)" != "$first" ]] || { printf '%s mount mutation was not fingerprinted\n' "$mount_field" >&2; exit 1; }
+done
 
 FP_LABELS='{"com.docker.compose.config-hash":"hash-b","com.docker.compose.replace":"container-b","com.example.owner":"changed"}'
 export FP_LABELS
