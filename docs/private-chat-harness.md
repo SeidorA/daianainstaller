@@ -119,12 +119,13 @@ into production or release automation.
 
 Activation requires `POSTGRES_PASSWORD` and `POSTGRES_DB`. Before recreating the
 app containers it invokes the existing Installer migration runner against a
-temporary directory containing the two private-chat migrations. The runner's
+temporary directory containing the three private-chat migrations. The runner's
 advisory lock, checksum history, ordering, and single transaction remain the
 source of truth; already applied checksums are skipped. Activation then verifies
-the live `private.daiana_installer_schema_migrations` ledger contains both
+the live `private.daiana_installer_schema_migrations` ledger contains all three
 version/name/checksum entries and checks the `history.message_ref`,
-`figure_artifacts`, and private quota finalization objects. This is explicitly
+`figure_artifacts`, public quota finalization, and Flowise no-history quota
+finalization objects. This is explicitly
 forward-only: before invoking the runner, the harness durably fsyncs an atomic
 intent marker with both expected versions/checksums and forward-only
 manual-recovery instructions. A successful runner plus live ledger/schema
@@ -132,9 +133,11 @@ verification atomically transitions that marker to committed evidence;
 catchable failures transition it to failed or blocked evidence. If the process
 is killed, the pending marker remains, the database outcome is unknown, and
 retry is blocked until manual reconciliation. The harness then writes
-`migrations-applied.receipt` with both versions, names, and checksums. Cleanup
+`migrations-applied.receipt` with all three versions, names, and checksums. Cleanup
 never rolls back migrations or claims atomic database compensation;
 post-commit receipt failures retain diagnostics and block retry.
+The new `migration_120000_*` fields are additive; retained receipts from the
+previous two-migration contract remain valid and are never rewritten.
 
 Restore the known baseline app images after the candidate run:
 

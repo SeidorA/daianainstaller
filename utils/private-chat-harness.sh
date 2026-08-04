@@ -22,6 +22,7 @@ APPROVED_NEXT_IMAGE_REPOSITORY="cloudseidoranalytics/daiana"
 APPROVED_PYTHON_IMAGE_REPOSITORY="cloudseidoranalytics/daianapython"
 APPROVED_MSTEAMS_IMAGE_REPOSITORY="cloudseidoranalytics/daianamsteams"
 APPROVED_STUDIO_IMAGE_REPOSITORY="cloudseidoranalytics/daianastudio"
+MIGRATION_120000="20260731120000_add_flowise_quota_finalization.sql"
 MIGRATION_130000="20260727130000_add_history_message_refs.sql"
 MIGRATION_140000="20260727140000_allow_authorized_private_message_quota.sql"
 COMPOSE_BASE=("$ROOT_DIR/docker-compose.yml" "$ROOT_DIR/docker-compose.app.yml")
@@ -521,6 +522,7 @@ require_candidate_configuration() {
 require_paths() {
   local path
   for path in "${COMPOSE_BASE[@]}" "$ROOT_DIR/docker-compose.private-chat-candidate.yml" \
+    "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000" \
     "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000" \
     "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000" "$ROOT_DIR/VERSION"; do
     [[ -f "$path" ]] || die "required harness path is missing: $path"
@@ -776,6 +778,7 @@ apply_and_verify_migrations() {
   local migration_dir ledger_checks schema_checks migration_status migration_outcome result_file
   migration_dir="$(mktemp -d "${TMPDIR:-/tmp}/private-chat-migrations.XXXXXX")"
   PRIVATE_CHAT_MIGRATION_DIR="$migration_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000" "$migration_dir/"
   export DAIANA_MIGRATIONS_DIR="$migration_dir"
@@ -825,12 +828,13 @@ apply_and_verify_migrations() {
   fi
   MIGRATION_APPLIED=1
   export MIGRATION_APPLIED
-  ledger_checks="$(docker_psql "SELECT count(*) = 2 FROM private.daiana_installer_schema_migrations WHERE (version, name, checksum) IN (('20260727130000', 'add_history_message_refs', '$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")'), ('20260727140000', 'allow_authorized_private_message_quota', '$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")')); SELECT version || '|' || name || '|' || checksum FROM private.daiana_installer_schema_migrations WHERE version IN ('20260727130000', '20260727140000') ORDER BY version;")"
-  [[ "$(printf '%s\n' "$ledger_checks" | sed -n '1p')" == t ]] || die "Installer migration ledger does not contain both approved feature entries"
+  ledger_checks="$(docker_psql "SELECT count(*) = 3 FROM private.daiana_installer_schema_migrations WHERE (version, name, checksum) IN (('20260727130000', 'add_history_message_refs', '$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")'), ('20260727140000', 'allow_authorized_private_message_quota', '$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")'), ('20260731120000', 'add_flowise_quota_finalization', '$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")')); SELECT version || '|' || name || '|' || checksum FROM private.daiana_installer_schema_migrations WHERE version IN ('20260727130000', '20260727140000', '20260731120000') ORDER BY version;")"
+  [[ "$(printf '%s\n' "$ledger_checks" | sed -n '1p')" == t ]] || die "Installer migration ledger does not contain all approved feature entries"
   [[ "$(printf '%s\n' "$ledger_checks" | sed -n '2p')" == "20260727130000|add_history_message_refs|$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" ]] || die "history-message migration ledger verification failed"
   [[ "$(printf '%s\n' "$ledger_checks" | sed -n '3p')" == "20260727140000|allow_authorized_private_message_quota|$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")" ]] || die "private-quota migration ledger verification failed"
-  schema_checks="$(docker_psql "SELECT to_regclass('public.history') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'history' AND column_name = 'message_ref'); SELECT to_regclass('public.figure_artifacts') IS NOT NULL; SELECT to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NOT NULL;")"
-  [[ "$(printf '%s\n' "$schema_checks" | grep -c '^t$')" -eq 3 ]] || die "required private-chat schema objects are missing"
+  [[ "$(printf '%s\n' "$ledger_checks" | sed -n '4p')" == "20260731120000|add_flowise_quota_finalization|$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")" ]] || die "Flowise quota finalization migration ledger verification failed"
+  schema_checks="$(docker_psql "SELECT to_regclass('public.history') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'history' AND column_name = 'message_ref'); SELECT to_regclass('public.figure_artifacts') IS NOT NULL; SELECT to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NOT NULL; SELECT to_regprocedure('public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)') IS NOT NULL;")"
+  [[ "$(printf '%s\n' "$schema_checks" | grep -c '^t$')" -eq 4 ]] || die "required private-chat schema objects are missing"
   write_migration_commitment || die "migrations committed but durable commitment evidence could not be written"
   MIGRATION_BOUNDARY_PENDING=0
 }
@@ -943,6 +947,7 @@ write_migrations_applied_receipt() {
   tmp="$receipt.tmp.$$"
   {
     printf 'schema=private-chat-harness/migrations-applied-v1\nstate=applied\nforward_only=true\nrollback=manual-recovery-required\n'
+    printf 'migration_120000_version=20260731120000\nmigration_120000_name=add_flowise_quota_finalization\nmigration_120000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")"
     printf 'migration_130000_version=20260727130000\nmigration_130000_name=add_history_message_refs\nmigration_130000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")"
     printf 'migration_140000_version=20260727140000\nmigration_140000_name=allow_authorized_private_message_quota\nmigration_140000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")"
     printf 'redaction=credentials, tokens, cookies, passwords, URLs, and database connection strings are never recorded\n'
@@ -963,6 +968,7 @@ write_migration_commitment() {
     printf 'schema=private-chat-harness/migration-boundary-v1\nstate=%s\nforward_only=true\nrollback=manual-recovery-required\n' "$state"
     printf 'recovery=forward-only manual reconciliation is required; never claim database rollback\n'
     printf 'retry=blocked until the database outcome and live migration ledger are manually reconciled\n'
+    printf 'migration_120000_version=20260731120000\nmigration_120000_name=add_flowise_quota_finalization\nmigration_120000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")"
     printf 'migration_130000_version=20260727130000\nmigration_130000_name=add_history_message_refs\nmigration_130000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")"
     printf 'migration_140000_version=20260727140000\nmigration_140000_name=allow_authorized_private_message_quota\nmigration_140000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")"
     printf 'redaction=credentials, tokens, cookies, passwords, URLs, and database connection strings are never recorded\n'
@@ -1028,7 +1034,7 @@ validate_migrations_applied_receipt() {
   [[ -s "$receipt" ]] || die "migration receipt is missing or empty; diagnostics retained: $receipt"
   while IFS= read -r line; do
     case "$line" in
-      schema=*|state=*|forward_only=*|rollback=*|migration_130000_version=*|migration_130000_name=*|migration_130000_sha256=*|migration_140000_version=*|migration_140000_name=*|migration_140000_sha256=*|redaction=*) ;;
+      schema=*|state=*|forward_only=*|rollback=*|migration_120000_version=*|migration_120000_name=*|migration_120000_sha256=*|migration_130000_version=*|migration_130000_name=*|migration_130000_sha256=*|migration_140000_version=*|migration_140000_name=*|migration_140000_sha256=*|redaction=*) ;;
       *) die "migration receipt contains an unknown or malformed field; diagnostics retained: $receipt" ;;
     esac
   done < "$receipt"
@@ -1036,6 +1042,9 @@ validate_migrations_applied_receipt() {
     receipt_has_exactly_one_key "$key" "$receipt" || die "migration receipt field is missing or duplicated ($key); diagnostics retained: $receipt"
   done
   [[ "$(receipt_value schema "$receipt")" == private-chat-harness/migrations-applied-v1 ]] || die "migration receipt schema is invalid; diagnostics retained: $receipt"
+  if [[ -n "$(receipt_value migration_120000_version "$receipt")$(receipt_value migration_120000_name "$receipt")$(receipt_value migration_120000_sha256 "$receipt")" ]]; then
+    [[ "$(receipt_value migration_120000_version "$receipt")" == 20260731120000 && "$(receipt_value migration_120000_name "$receipt")" == add_flowise_quota_finalization && "$(receipt_value migration_120000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")" ]] || die "migration 120000 receipt mismatch; diagnostics retained: $receipt"
+  fi
   [[ "$(receipt_value state "$receipt")" == applied && "$(receipt_value forward_only "$receipt")" == true && "$(receipt_value rollback "$receipt")" == manual-recovery-required ]] || die "migration receipt does not declare forward-only manual recovery; diagnostics retained: $receipt"
   [[ "$(receipt_value migration_130000_version "$receipt")" == 20260727130000 && "$(receipt_value migration_130000_name "$receipt")" == add_history_message_refs && "$(receipt_value migration_130000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" ]] || die "migration 130000 receipt mismatch; diagnostics retained: $receipt"
   [[ "$(receipt_value migration_140000_version "$receipt")" == 20260727140000 && "$(receipt_value migration_140000_name "$receipt")" == allow_authorized_private_message_quota && "$(receipt_value migration_140000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")" ]] || die "migration 140000 receipt mismatch; diagnostics retained: $receipt"
@@ -1046,7 +1055,7 @@ validate_migration_commitment() {
   [[ -s "$receipt" ]] || die "migration commitment is missing or empty; diagnostics retained: $receipt"
   while IFS= read -r line; do
     case "$line" in
-      schema=*|state=*|forward_only=*|rollback=*|recovery=*|retry=*|migration_130000_version=*|migration_130000_name=*|migration_130000_sha256=*|migration_140000_version=*|migration_140000_name=*|migration_140000_sha256=*|redaction=*) ;;
+      schema=*|state=*|forward_only=*|rollback=*|recovery=*|retry=*|migration_120000_version=*|migration_120000_name=*|migration_120000_sha256=*|migration_130000_version=*|migration_130000_name=*|migration_130000_sha256=*|migration_140000_version=*|migration_140000_name=*|migration_140000_sha256=*|redaction=*) ;;
       *) die "migration commitment contains an unknown or malformed field; diagnostics retained: $receipt" ;;
     esac
   done < "$receipt"
@@ -1054,6 +1063,7 @@ validate_migration_commitment() {
     receipt_has_exactly_one_key "$key" "$receipt" || die "migration commitment field is missing or duplicated ($key); diagnostics retained: $receipt"
   done
   [[ "$(receipt_value schema "$receipt")" == private-chat-harness/migration-boundary-v1 && "$(receipt_value state "$receipt")" == committed && "$(receipt_value forward_only "$receipt")" == true && "$(receipt_value rollback "$receipt")" == manual-recovery-required && "$(receipt_value recovery "$receipt")" == 'forward-only manual reconciliation is required; never claim database rollback' && "$(receipt_value retry "$receipt")" == 'blocked until the database outcome and live migration ledger are manually reconciled' ]] || die "migration commitment is not forward-only; diagnostics retained: $receipt"
+  [[ -z "$(receipt_value migration_120000_sha256 "$receipt")" || ( "$(receipt_value migration_120000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")" && "$(receipt_value migration_120000_version "$receipt")" == 20260731120000 ) ]] || die "migration commitment Flowise fingerprint mismatch; diagnostics retained: $receipt"
   [[ "$(receipt_value migration_130000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" && "$(receipt_value migration_140000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")" && "$(receipt_value migration_130000_version "$receipt")" == 20260727130000 && "$(receipt_value migration_140000_version "$receipt")" == 20260727140000 ]] || die "migration commitment fingerprint mismatch; diagnostics retained: $receipt"
 }
 
@@ -1075,7 +1085,7 @@ validate_receipt_integrity() {
   [[ "$(receipt_value phase "$receipt")" == "$expected_phase" ]] || die "receipt phase is invalid; diagnostics retained: $receipt"
   while IFS= read -r line; do
     case "$line" in
-      schema=*|phase=*|compose_project=*|network=*|mutation_services=*|host_architecture=*|baseline_next_*|baseline_python_*|baseline_msteams_*|baseline_studio_*|candidate_next_*|candidate_python_*|candidate_msteams_*|candidate_studio_*|migration_130000_sha256=*|migration_140000_sha256=*|next_container_id=*|python_container_id=*|msteams_container_id=*|studio_container_id=*|next_safe_config_sha256=*|python_safe_config_sha256=*|msteams_safe_config_sha256=*|studio_safe_config_sha256=*|next_candidate_config_sha256=*|python_candidate_config_sha256=*|msteams_candidate_config_sha256=*|studio_candidate_config_sha256=*|candidate_architecture=*|redaction=*) ;;
+      schema=*|phase=*|compose_project=*|network=*|mutation_services=*|host_architecture=*|baseline_next_*|baseline_python_*|baseline_msteams_*|baseline_studio_*|candidate_next_*|candidate_python_*|candidate_msteams_*|candidate_studio_*|migration_120000_sha256=*|migration_130000_sha256=*|migration_140000_sha256=*|next_container_id=*|python_container_id=*|msteams_container_id=*|studio_container_id=*|next_safe_config_sha256=*|python_safe_config_sha256=*|msteams_safe_config_sha256=*|studio_safe_config_sha256=*|next_candidate_config_sha256=*|python_candidate_config_sha256=*|msteams_candidate_config_sha256=*|studio_candidate_config_sha256=*|candidate_architecture=*|redaction=*) ;;
       *) die "receipt contains an unknown or malformed field; diagnostics retained: $receipt" ;;
     esac
   done < "$receipt"
@@ -1098,6 +1108,7 @@ validate_receipt_integrity() {
   [[ "$(receipt_value baseline_msteams_repo_digest "$receipt")" == none || "$(receipt_value baseline_msteams_repo_digest "$receipt")" == *sha256:* ]] || die "receipt baseline image digest is invalid; diagnostics retained: $receipt"
   [[ "$(receipt_value baseline_studio_repo_digest "$receipt")" == none || "$(receipt_value baseline_studio_repo_digest "$receipt")" == *sha256:* ]] || die "receipt baseline image digest is invalid; diagnostics retained: $receipt"
   [[ "$(receipt_value candidate_next_image "$receipt")" == "$DAIANA_CANDIDATE_NEXT_IMAGE" && "$(receipt_value candidate_python_image "$receipt")" == "$DAIANA_CANDIDATE_PYTHON_IMAGE" && "$(receipt_value candidate_msteams_image "$receipt")" == "$DAIANA_CANDIDATE_MSTEAMS_IMAGE" && "$(receipt_value candidate_studio_image "$receipt")" == "$DAIANA_CANDIDATE_STUDIO_IMAGE" ]] || die "receipt candidate image does not match requested candidate; diagnostics retained: $receipt"
+  [[ -z "$(receipt_value migration_120000_sha256 "$receipt")" || "$(receipt_value migration_120000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")" ]] || die "receipt Flowise migration fingerprint mismatch; diagnostics retained: $receipt"
   [[ "$(receipt_value migration_130000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" && "$(receipt_value migration_140000_sha256 "$receipt")" == "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")" ]] || die "receipt migration fingerprint mismatch; diagnostics retained: $receipt"
   [[ "$(receipt_value next_safe_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value python_safe_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value msteams_safe_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value studio_safe_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ ]] || die "receipt configuration fingerprint is invalid; diagnostics retained: $receipt"
   [[ "$(receipt_value baseline_next_protected_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value baseline_python_protected_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value baseline_msteams_protected_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ && "$(receipt_value baseline_studio_protected_config_sha256 "$receipt")" =~ ^[a-f0-9]{64}$ ]] || die "public/internal URL and Vault configuration fingerprint is invalid; diagnostics retained: $receipt"
@@ -1173,7 +1184,7 @@ write_receipt() {
      printf 'baseline_next_explicit_env_contract=%s\nbaseline_python_explicit_env_contract=%s\n' "$(printf '%s\n' "$BASELINE_NEXT_EXPLICIT_ENV_CONTRACT" | paste -sd, -)" "$(printf '%s\n' "$BASELINE_PYTHON_EXPLICIT_ENV_CONTRACT" | paste -sd, -)"
      printf 'baseline_next_node_env_state=%s\nbaseline_python_node_env_state=%s\nbaseline_msteams_node_env_state=%s\nbaseline_studio_node_env_state=%s\n' "$baseline_next_node_env_state" "$baseline_python_node_env_state" "$baseline_msteams_node_env_state" "$baseline_studio_node_env_state"
      printf 'candidate_next_image=%s\ncandidate_python_image=%s\ncandidate_msteams_image=%s\ncandidate_studio_image=%s\n' "${DAIANA_CANDIDATE_NEXT_IMAGE:?missing}" "${DAIANA_CANDIDATE_PYTHON_IMAGE:?missing}" "${DAIANA_CANDIDATE_MSTEAMS_IMAGE:?missing}" "${DAIANA_CANDIDATE_STUDIO_IMAGE:?missing}"
-    printf 'migration_130000_sha256=%s\nmigration_140000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")"
+     printf 'migration_120000_sha256=%s\nmigration_130000_sha256=%s\nmigration_140000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000")" "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000")" "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000")"
      printf 'next_container_id=%s\npython_container_id=%s\nmsteams_container_id=%s\nstudio_container_id=%s\n' "$(docker container inspect --format '{{.Id}}' "$NEXT_CONTAINER")" "$(docker container inspect --format '{{.Id}}' "$PYTHON_CONTAINER")" "$(docker container inspect --format '{{.Id}}' "$MSTEAMS_CONTAINER")" "$(docker container inspect --format '{{.Id}}' "$STUDIO_CONTAINER")"
      printf 'next_safe_config_sha256=%s\npython_safe_config_sha256=%s\nmsteams_safe_config_sha256=%s\nstudio_safe_config_sha256=%s\n' "$(safe_config_fingerprint "$NEXT_CONTAINER")" "$(safe_config_fingerprint "$PYTHON_CONTAINER")" "$(safe_config_fingerprint "$MSTEAMS_CONTAINER")" "$(safe_config_fingerprint "$STUDIO_CONTAINER")"
      printf 'candidate_next_image_id=%s\ncandidate_python_image_id=%s\ncandidate_msteams_image_id=%s\ncandidate_studio_image_id=%s\n' "$next_id" "$python_id" "$msteams_id" "$studio_id"
@@ -1203,7 +1214,8 @@ write_failure_diagnostics() {
     printf 'candidate_runtime_mutation_started=%s\ncompensation_attempted=%s\n' "$RUNTIME_MUTATION_STARTED" "${COMPENSATING:-0}"
     printf 'baseline_next_image=%s\nbaseline_python_image=%s\n' "$NEXT_BASE_IMAGE" "$PYTHON_BASE_IMAGE"
     printf 'baseline_next_fingerprint=%s\nbaseline_python_fingerprint=%s\n' "${BASELINE_NEXT_FINGERPRINT:-unknown}" "${BASELINE_PYTHON_FINGERPRINT:-unknown}"
-    printf 'migration_130000_version=20260727130000\nmigration_130000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000" 2>/dev/null || printf unknown)"
+     printf 'migration_120000_version=20260731120000\nmigration_120000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_120000" 2>/dev/null || printf unknown)"
+     printf 'migration_130000_version=20260727130000\nmigration_130000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_130000" 2>/dev/null || printf unknown)"
     printf 'migration_140000_version=20260727140000\nmigration_140000_sha256=%s\n' "$(sha256 "$ROOT_DIR/volumes/db/daiana-migrations/$MIGRATION_140000" 2>/dev/null || printf unknown)"
     printf 'diagnostics=redacted; no environment values, credentials, tokens, cookies, passwords, URLs, or database connection strings\n'
   } | redact_reason > "$tmp" || {

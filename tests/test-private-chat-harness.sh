@@ -8,6 +8,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 harness="$ROOT_DIR/utils/private-chat-harness.sh"
 override="$ROOT_DIR/docker-compose.private-chat-candidate.yml"
+flowise_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260731120000_add_flowise_quota_finalization.sql"
 next_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727130000_add_history_message_refs.sql"
 quota_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727140000_allow_authorized_private_message_quota.sql"
 make_source_repo() {
@@ -63,8 +64,12 @@ grep -q 'name: daiana-mgmt' "$override" || fail "candidate changed the required 
 grep -q 'external: true' "$override" || fail "candidate network is not external"
 pass "candidate Compose override remains local-only"
 
-for migration in "$next_migration" "$quota_migration"; do
-  grep -q 'Provenance: daianapython commit 16e161f468f1976d15ba40b1312dc5f247d64dab' "$migration" || fail "migration provenance is missing"
+for migration in "$flowise_migration" "$next_migration" "$quota_migration"; do
+  if [[ "$migration" == "$flowise_migration" ]]; then
+    grep -q 'Provenance: daianapython commit 68565fb1870da340a6f5f3f6bc258f7bf3d70ab8' "$migration" || fail "Flowise migration provenance is missing"
+  else
+    grep -q 'Provenance: daianapython commit 16e161f468f1976d15ba40b1312dc5f247d64dab' "$migration" || fail "migration provenance is missing"
+  fi
   grep -q 'Canonical source SHA-256:' "$migration" || fail "migration source checksum is missing"
 done
 
@@ -223,9 +228,9 @@ case "${1:-}" in
         done
         [[ -e "${FAKE_STATE}.migration-stop" ]] || exit 124
      fi
-     if [[ "$*" == *'count(*) = 2'* ]]; then
-      printf 't\n20260727130000|add_history_message_refs|%s\n20260727140000|allow_authorized_private_message_quota|%s\n' "$(shasum -a 256 "$DAIANA_TEST_NEXT_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_QUOTA_MIGRATION" | cut -d ' ' -f 1)"
-    elif [[ "$*" == *to_regclass* ]]; then printf 't\nt\nt\n'
+      if [[ "$*" == *'count(*) = 3'* ]]; then
+       printf 't\n20260727130000|add_history_message_refs|%s\n20260727140000|allow_authorized_private_message_quota|%s\n20260731120000|add_flowise_quota_finalization|%s\n' "$(shasum -a 256 "$DAIANA_TEST_NEXT_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_QUOTA_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_FLOWISE_MIGRATION" | cut -d ' ' -f 1)"
+     elif [[ "$*" == *to_regclass* ]]; then printf 't\nt\nt\nt\n'
      else while IFS= read -r _; do :; done; fi
      exit ;;
    compose)
@@ -373,7 +378,7 @@ run_case() {
     export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8 DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
-  export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
+    export DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
       unset DAIANA_HARNESS_TEST_FAIL_RECEIPT_WRITE DAIANA_HARNESS_TEST_FAIL_RECEIPT_VALIDATION DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_WRITE DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_VALIDATION DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_RENAME DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_FSYNC DAIANA_HARNESS_TEST_FAIL_MIGRATION_COMMITMENT_WRITE DAIANA_HARNESS_TEST_FAIL_POST_MIGRATION DAIANA_HARNESS_TEST_SIGNAL_AFTER_MIGRATION DAIANA_HARNESS_TEST_TAMPER_STAGED_RECEIPT DAIANA_HARNESS_TEST_TAMPER_BASELINE_FINGERPRINT
    [[ "$scenario" != receipt_write ]] || export DAIANA_HARNESS_TEST_FAIL_RECEIPT_WRITE=yes
    [[ "$scenario" != receipt_validation ]] || export DAIANA_HARNESS_TEST_FAIL_RECEIPT_VALIDATION=yes
@@ -471,7 +476,7 @@ run_success() {
     export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8 DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
-  export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
+   export DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
    export DAIANA_HARNESS_TEST_DURABLE_TRACE_FILE="$TMP_DIR/durable-success.log" DAIANA_COMPOSE_PROJECT_NAME=daiana-app
       DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes PATH="$FAKE_BIN:$PATH" bash "$harness" activate || fail "successful activation failed"
   [[ -e "$state_dir/active" && -s "$state_dir/active.receipt" ]] || fail "successful activation did not publish active receipt/marker"
@@ -483,7 +488,9 @@ run_success() {
   baseline_line="$(grep -n 'baseline.receipt' "$TMP_DIR/durable-success.log" | sed -n '1p' | cut -d: -f1)"
   active_line="$(grep -n 'active.receipt' "$TMP_DIR/durable-success.log" | sed -n '1p' | cut -d: -f1)"
   [[ -n "$baseline_line" && -n "$active_line" && "$baseline_line" -lt "$active_line" ]] || fail "baseline receipt was not durably published before active receipt"
-  grep -q '^forward_only=true$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted forward-only state"
+   grep -q '^forward_only=true$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted forward-only state"
+   grep -q '^migration_120000_version=20260731120000$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted Flowise migration version"
+   grep -q '^migration_120000_name=add_flowise_quota_finalization$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted Flowise migration name"
    grep -q "candidate_next_image=$next_image" "$state_dir/active.receipt" || fail "active receipt omitted requested image"
     if [[ "$FAKE_SCENARIO" == baseline_env_missing_python ]]; then
       grep -q '^baseline_python_node_env_state=implicit-production$' "$state_dir/active.receipt" || fail "missing baseline NODE_ENV was not recorded as implicit production"
