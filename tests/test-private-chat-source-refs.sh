@@ -46,9 +46,9 @@ pass "normal ancestry uses Front, Python, and Teams develop plus Studio feat/dai
 
 approved_next='cloudseidoranalytics/daiana:sha-503d3c65bce2d9ec68d714010f680f702052c3dc'
 approved_python='cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8'
-approved_msteams='cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e'
+approved_msteams='cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1'
 approved_studio='cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69'
-approved_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
+approved_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
 local_guard=(ALLOW_LOCAL_FEATURE_REFS=1 "${local_guard[@]}")
 env "${approved_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "approved refs with opt-in rejected"
 pass "exact approved full SHAs pass only with local opt-in and guards"

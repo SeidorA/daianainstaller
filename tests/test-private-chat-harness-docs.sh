@@ -55,11 +55,11 @@ if "Daiana quota changes" not in text:
     raise SystemExit("documentation does not explain the Studio baseline rationale")
 expected_refs = (
     "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
-    "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e",
+    "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1",
     "DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69",
     "DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc",
     "DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
-    "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e",
+    "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1",
     "DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69",
 )
 missing_refs = [ref for ref in expected_refs if ref not in harness_blocks[0]]
