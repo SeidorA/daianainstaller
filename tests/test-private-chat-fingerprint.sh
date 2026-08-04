@@ -13,8 +13,12 @@ cat > "$TMP_DIR/docker" <<'DOCKER'
 set -euo pipefail
 if [[ "${4:-}" == *Config.Env* ]]; then
   printf '%s' "${FP_ENV:?}"
+elif [[ "${4:-}" == *Config.Labels* ]]; then
+  printf '%s' "${FP_LABELS:?}"
+elif [[ "${4:-}" == *Mounts* ]]; then
+  printf '%s\n' '|[]|default'
 else
-  printf '%s\n' 'local/image|/work|[]|[]|{}|[]|default'
+  printf '%s\n' 'local/image|/work|[]|[]|'
 fi
 DOCKER
 chmod +x "$TMP_DIR/docker"
@@ -29,10 +33,22 @@ FP_ENV='["A=line1\\nline2=equals","B=stable"]'
 # shellcheck disable=SC2090
 # shellcheck disable=SC2090
 # shellcheck disable=SC2090
- export FP_ENV
+export FP_ENV
+FP_LABELS='{"com.docker.compose.config-hash":"hash-a","com.docker.compose.replace":"container-a","com.example.owner":"harness"}'
+export FP_LABELS
 first="$(safe_config_fingerprint app)"
 second="$(safe_config_fingerprint app)"
 [[ "$first" == "$second" ]] || { printf 'fingerprint is not deterministic\n' >&2; exit 1; }
+
+FP_LABELS='{"com.docker.compose.config-hash":"hash-b","com.docker.compose.replace":"container-b","com.example.owner":"harness"}'
+export FP_LABELS
+lifecycle_changed="$(safe_config_fingerprint app)"
+[[ "$lifecycle_changed" == "$first" ]] || { printf 'Compose lifecycle label mutation changed the fingerprint\n' >&2; exit 1; }
+
+FP_LABELS='{"com.docker.compose.config-hash":"hash-b","com.docker.compose.replace":"container-b","com.example.owner":"changed"}'
+export FP_LABELS
+application_changed="$(safe_config_fingerprint app)"
+[[ "$application_changed" != "$first" ]] || { printf 'application label mutation was ignored\n' >&2; exit 1; }
 
 # shellcheck disable=SC2089,SC2090
 FP_ENV='["A=bc"]'

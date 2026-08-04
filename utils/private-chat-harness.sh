@@ -212,12 +212,12 @@ for name in ("daiananext", "daianapython", "daianamsteams", "daianastudio"):
 }
 
 safe_config_fingerprint() {
-  local container="$1" temp_dir env_file records_file metadata_file fingerprint_file status=1
+  local container="$1" temp_dir env_file records_file labels_file canonical_labels_file metadata_file fingerprint_file status=1
   local xtrace_was_enabled=0
   case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/private-chat-fingerprint.XXXXXX")" || { (( xtrace_was_enabled )) && set -x; return 1; }
   PRIVATE_CHAT_FINGERPRINT_DIR="$temp_dir"
-  env_file="$temp_dir/env"; records_file="$temp_dir/records"; metadata_file="$temp_dir/metadata"; fingerprint_file="$temp_dir/fingerprint"
+  env_file="$temp_dir/env"; records_file="$temp_dir/records"; labels_file="$temp_dir/labels"; canonical_labels_file="$temp_dir/canonical-labels"; metadata_file="$temp_dir/metadata"; fingerprint_file="$temp_dir/fingerprint"
   if ! command -v python3 >/dev/null 2>&1 || ! docker container inspect --format '{{json .Config.Env}}' "$container" > "$env_file"; then
     cleanup_fingerprint_temp
     (( xtrace_was_enabled )) && set -x
@@ -233,9 +233,20 @@ for entry in json.load(sys.stdin):
     (( xtrace_was_enabled )) && set -x
     return 1
   fi
+  if ! docker container inspect --format '{{json .Config.Labels}}' "$container" > "$labels_file" || ! python3 -c 'import json,sys
+labels=json.load(sys.stdin)
+if not isinstance(labels,dict):
+    raise SystemExit(1)
+print(json.dumps({key: value for key, value in labels.items() if not key.startswith("com.docker.compose.")}, sort_keys=True, separators=(",", ":")))' < "$labels_file" > "$canonical_labels_file"; then
+    cleanup_fingerprint_temp
+    (( xtrace_was_enabled )) && set -x
+    return 1
+  fi
   if ! {
     printf '%s\0' 'schema=safe-config-fingerprint-v3'
-     docker container inspect --format '{{.Config.Image}}|{{.Config.WorkingDir}}|{{json .Config.Cmd}}|{{json .Config.Entrypoint}}|{{json .Config.Labels}}|{{json .Mounts}}|{{.HostConfig.NetworkMode}}' "$container"
+     docker container inspect --format '{{.Config.Image}}|{{.Config.WorkingDir}}|{{json .Config.Cmd}}|{{json .Config.Entrypoint}}|' "$container"
+     cat "$canonical_labels_file"
+     docker container inspect --format '|{{json .Mounts}}|{{.HostConfig.NetworkMode}}' "$container"
     printf '\0sorted-length-delimited-env-records\0'
     cat "$records_file"
   } > "$metadata_file"; then

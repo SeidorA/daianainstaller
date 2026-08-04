@@ -201,7 +201,8 @@ case "${1:-}" in
          elif [[ "$container" == daiana-studio ]]; then printf 'sha256:%064d\n' 6
          else printf 'sha256:%064d\n' 2; fi
      elif [[ "${4:-}" == *'{{.Id}}'* ]]; then printf '%s-%s-id\n' "$state" "$container"
-    elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
+     elif [[ "${4:-}" == *Config.Labels* ]]; then printf '{}\n'
+     elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
     else printf 'container-id\n'; fi
     exit ;;
   exec)
