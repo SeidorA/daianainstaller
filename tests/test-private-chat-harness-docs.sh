@@ -47,18 +47,18 @@ if "PRIVATE_CHAT_PYTHON_ORIGIN=\"$PRIVATE_CHAT_PYTHON_ORIGIN\"" not in harness_b
 if "origin-only HTTP/HTTPS URL" not in normalized_text or "private/loopback `nip.io` hosts" not in normalized_text:
     raise SystemExit("documentation does not describe the local origin policy")
 
-if "DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-cd910e8a22c43947cf5f726ec7e8ef85da157e57" not in harness_blocks[0]:
+if "DAIANA_CANDIDATE_NEXT_IMAGE=cloudseidoranalytics/daiana:sha-892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8" not in harness_blocks[0]:
     raise SystemExit("preflight does not document the exact approved Front image ref")
 if "Python and Teams use their local `develop` refs, while Studio uses its fixed local `feat/daiana-313` ref" not in normalized_text:
     raise SystemExit("documentation does not record the fixed per-repository source baselines")
 if "Daiana quota changes" not in text:
     raise SystemExit("documentation does not explain the Studio baseline rationale")
 expected_refs = (
-    "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-3ebc16d029b06efd2a0cd6b02980c45324948150",
+    "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
     "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e",
     "DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69",
-    "DAIANA_APPROVED_NEXT_SOURCE_SHA=cd910e8a22c43947cf5f726ec7e8ef85da157e57",
-    "DAIANA_APPROVED_PYTHON_SOURCE_SHA=3ebc16d029b06efd2a0cd6b02980c45324948150",
+    "DAIANA_APPROVED_NEXT_SOURCE_SHA=892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8",
+    "DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
     "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e",
     "DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69",
 )
