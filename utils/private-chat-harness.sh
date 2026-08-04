@@ -876,6 +876,7 @@ validate_candidate_source_refs() {
   local next_sha python_sha msteams_sha studio_sha front_repo python_repo msteams_repo studio_repo
   local front_base_ref python_base_ref msteams_base_ref studio_base_ref
   local approved_next_sha approved_python_sha approved_msteams_sha approved_studio_sha
+  local cleanup_mode="${1:-}" active_receipt="${2:-}"
   require_local_candidate_context
   [[ "${DAIANA_CANDIDATE_NEXT_IMAGE:-}" == "$APPROVED_NEXT_IMAGE_REPOSITORY":* ]] || die "Next candidate image must use the approved repository"
   [[ "${DAIANA_CANDIDATE_PYTHON_IMAGE:-}" == "$APPROVED_PYTHON_IMAGE_REPOSITORY":* ]] || die "Python candidate image must use the approved repository"
@@ -902,6 +903,18 @@ validate_candidate_source_refs() {
   git -C "$python_repo" cat-file -e "$python_sha^{commit}" 2>/dev/null || die "Python candidate source SHA is not present in the local source repository"
   git -C "$msteams_repo" cat-file -e "$msteams_sha^{commit}" 2>/dev/null || die "Teams candidate source SHA is not present in the local source repository"
   git -C "$studio_repo" cat-file -e "$studio_sha^{commit}" 2>/dev/null || die "Studio candidate source SHA is not present in the local source repository"
+  if [[ "$cleanup_mode" == cleanup ]]; then
+    [[ -s "$active_receipt" ]] || die "cleanup compatibility requires the validated active receipt"
+    git -C "$front_repo" rev-parse --verify "$front_base_ref^{commit}" >/dev/null 2>&1 || die "Front repository develop ref is unavailable"
+    git -C "$python_repo" rev-parse --verify "$python_base_ref^{commit}" >/dev/null 2>&1 || die "Python repository develop ref is unavailable"
+    git -C "$msteams_repo" rev-parse --verify "$msteams_base_ref^{commit}" >/dev/null 2>&1 || die "Teams repository develop ref is unavailable"
+    git -C "$studio_repo" rev-parse --verify "$studio_base_ref^{commit}" >/dev/null 2>&1 || die "Studio repository feat/daiana-313 ref is unavailable"
+    [[ "$(receipt_value candidate_next_source_sha "$active_receipt")" == "$next_sha" \
+      && "$(receipt_value candidate_python_source_sha "$active_receipt")" == "$python_sha" \
+      && "$(receipt_value candidate_msteams_source_sha "$active_receipt")" == "$msteams_sha" \
+      && "$(receipt_value candidate_studio_source_sha "$active_receipt")" == "$studio_sha" ]] || die "active receipt source SHAs do not match candidate image refs"
+    return 0
+  fi
   approved_next_sha="${DAIANA_APPROVED_NEXT_SOURCE_SHA:-}"
   approved_python_sha="${DAIANA_APPROVED_PYTHON_SOURCE_SHA:-}"
   approved_msteams_sha="${DAIANA_APPROVED_MSTEAMS_SOURCE_SHA:-}"
@@ -1559,9 +1572,9 @@ cleanup() {
    if ! require_candidate_image "$DAIANA_CANDIDATE_PYTHON_IMAGE" "Python"; then cleanup_failure "candidate Python image validation failed before baseline restore"; return 1; fi
    if ! require_candidate_image "$DAIANA_CANDIDATE_MSTEAMS_IMAGE" "Teams"; then cleanup_failure "candidate Teams image validation failed before baseline restore"; return 1; fi
    if ! require_candidate_image "$DAIANA_CANDIDATE_STUDIO_IMAGE" "Studio"; then cleanup_failure "candidate Studio image validation failed before baseline restore"; return 1; fi
-  if ! validate_candidate_source_refs; then cleanup_failure "candidate source-reference validation failed before baseline restore"; return 1; fi
   if ! validate_receipt_integrity "$STATE_DIR/baseline.receipt" baseline; then cleanup_failure "baseline receipt validation failed before baseline restore"; return 1; fi
   if ! validate_receipt_integrity "$STATE_DIR/active.receipt" active; then cleanup_failure "active receipt validation failed before baseline restore"; return 1; fi
+  if ! validate_candidate_source_refs cleanup "$STATE_DIR/active.receipt"; then cleanup_failure "candidate source-reference validation failed before baseline restore"; return 1; fi
   if ! validate_migration_commitment "$STATE_DIR/migrations-committed.receipt"; then cleanup_failure "migration commitment validation failed before baseline restore"; return 1; fi
   if ! validate_migrations_applied_receipt "$STATE_DIR/migrations-applied.receipt"; then cleanup_failure "migration receipt validation failed before baseline restore"; return 1; fi
   BASELINE_NEXT_IMAGE_ID="$(receipt_value baseline_next_image_id "$STATE_DIR/baseline.receipt")"

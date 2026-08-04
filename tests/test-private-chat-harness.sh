@@ -514,6 +514,44 @@ pass "all four rendered candidate services preserve the exact development enviro
 SUCCESS_SCENARIO=compose_image_default_env_omitted run_success
 unset DAIANA_COMPOSE_PROJECT_NAME
 
+run_prior_candidate_cleanup() {
+  local state_dir="$TMP_DIR/state-prior-candidate" old_front_sha='892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8' command prior_state
+  state_dir="$TMP_DIR/state-prior-candidate"
+  mkdir -p "$state_dir"
+  printf 'baseline\n' > "$TMP_DIR/docker-state-prior-candidate"
+  : > "$TMP_DIR/docker-prior-candidate.log"
+  export FAKE_SCENARIO=none FAKE_STATE="$TMP_DIR/docker-state-prior-candidate" DOCKER_LOG="$TMP_DIR/docker-prior-candidate.log"
+  export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=c31a2262eb5720707861ac79a8d4cd55311c730e DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
+  export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
+  export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration" DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes
+  for command in preflight activate; do
+    prior_state="$TMP_DIR/state-prior-$command"
+    mkdir -p "$prior_state"
+    export DAIANA_HARNESS_STATE_DIR="$prior_state" DAIANA_CANDIDATE_NEXT_IMAGE="cloudseidoranalytics/daiana:sha-$old_front_sha"
+    if PATH="$FAKE_BIN:$PATH" bash "$harness" "$command" >/dev/null 2>&1; then
+      fail "prior Front candidate was accepted by $command"
+    fi
+  done
+  export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image"
+  PATH="$FAKE_BIN:$PATH" bash "$harness" activate >/dev/null || fail "current candidate activation failed"
+  python3 - "$state_dir/baseline.receipt" "$state_dir/active.receipt" "$old_front_sha" <<'PY'
+from pathlib import Path
+import sys
+
+old_sha = sys.argv[3]
+for path in map(Path, sys.argv[1:3]):
+    contents = path.read_text()
+    contents = contents.replace("503d3c65bce2d9ec68d714010f680f702052c3dc", old_sha)
+    path.write_text(contents)
+PY
+  export DAIANA_CANDIDATE_NEXT_IMAGE="cloudseidoranalytics/daiana:sha-$old_front_sha"
+  PATH="$FAKE_BIN:$PATH" bash "$harness" cleanup >/dev/null || fail "prior active Front candidate was rejected by cleanup"
+  [[ "$(cat "$TMP_DIR/docker-state-prior-candidate")" == baseline ]] || fail "prior active candidate cleanup did not restore baseline"
+  pass "prior active candidate refs fail preflight/activation but remain accepted by cleanup"
+}
+
+run_prior_candidate_cleanup
+
 run_rejected_project_override() {
   local project="$1" state_dir
   state_dir="$TMP_DIR/state-project-$project"
