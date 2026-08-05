@@ -10,6 +10,7 @@ services:
       NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      PRIVATE_CHAT_PYTHON_ORIGIN: ${BACKEND_BASE_URL}
       WEBUI_PUBLIC_URL: ${WEBUI_BASE_URL}
       WEBUI_AUTH_HANDOFF_SECRET: ${WEBUI_AUTH_HANDOFF_SECRET:-}
     depends_on:
@@ -59,6 +60,7 @@ services:
       GOOGLE_EMBEDDING_MODEL: ${GOOGLE_EMBEDDING_MODEL}
       GOOGLE_TEMPERATURE: 0.1
       LICENSE_ACTIVATION_BASE_URL: ${LICENSE_ACTIVATION_BASE_URL}
+      TEAMS_INTERNAL_AUTH_SECRET: ${TEAMS_INTERNAL_AUTH_SECRET:-}
     tty: true
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://daianapython:5002/api/v1/health || exit 1" ]
@@ -101,7 +103,8 @@ services:
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
-      DAIANA_URL: ${BACKEND_BASE_URL}
+      API_DAIANA_URL: ${BACKEND_BASE_URL}
+      TEAMS_INTERNAL_AUTH_SECRET: ${TEAMS_INTERNAL_AUTH_SECRET:-}
     # command: /bin/sh -c "gunicorn --bind 0.0.0.0:3978 --worker-class aiohttp.worker.GunicornWebWorker --timeout 600 app:app"
     tty: true
     depends_on:

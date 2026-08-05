@@ -469,7 +469,8 @@ fi
 load_dotenv() {
   local file="$1"
   local force="${2:-0}"
-  local line key value
+  local line key value xtrace_was_enabled=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       ''|'#'*) continue ;;
@@ -478,8 +479,12 @@ load_dotenv() {
     case "$line" in
       *=*)
         key="${line%%=*}"
-        value="${line#*=}"
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        value="${line#*=}"
+        case "$key" in
+          *PASS*|*TOKEN*|*SECRET*|*KEY*|*PAT*|*BEARER*|*COOKIE*|*AUTH*) : ;;
+          *) : ;;
+        esac
         if [[ "$value" == \"*\" && "$value" == *\" ]]; then
           value="${value:1:${#value}-2}"
         elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
@@ -493,6 +498,7 @@ load_dotenv() {
         ;;
     esac
   done < "$file"
+  if (( xtrace_was_enabled )); then set -x; fi
 }
 
 load_dotenv .env 0
@@ -503,17 +509,29 @@ else
 fi
 
 persist_env_value() {
-  local key="$1"
-  local value="$2"
-  local tmp
-  tmp="$(mktemp)"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { done = 0 }
-    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" { print key "=" value; done = 1; next }
-    { print }
-    END { if (done == 0) print key "=" value }
-  ' .env > "$tmp"
-  mv "$tmp" .env
+  (
+    case "$-" in *x*) set +x ;; esac
+    local key="$1" value="$2" tmp value_file
+    tmp="$(mktemp)"
+    value_file="$(mktemp)"
+    chmod 600 "$value_file"
+    printf '%s' "$value" > "$value_file"
+    if ! awk -v key="$key" -v value_file="$value_file" '
+      BEGIN { done = 0 }
+      BEGIN { done = 0; if ((getline value < value_file) < 0) exit 1 }
+      $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" { print key "=" value; done = 1; next }
+      { print }
+      END { if (done == 0) print key "=" value }
+    ' .env > "$tmp"; then
+      rm -f "$tmp" "$value_file"
+      return 1
+    fi
+    rm -f "$value_file"
+    if ! mv "$tmp" .env; then
+      rm -f "$tmp"
+      return 1
+    fi
+  )
 }
 
 seed_supabase_env() {
@@ -559,41 +577,45 @@ seed_supabase_env
 
 BASE_DOMAIN="${BASE_DOMAIN:-}"
 NPM_ADMIN_EMAIL="${NPM_ADMIN_EMAIL:-}"
+secret_init_xtrace_was_enabled=0
+case "$-" in *x*) secret_init_xtrace_was_enabled=1; set +x ;; esac
 NPM_ADMIN_PASS="${NPM_ADMIN_PASS:-}"
 PORTAINER_ADMIN_PASS="${PORTAINER_ADMIN_PASS:-${NPM_ADMIN_PASS:-}}"
+if (( secret_init_xtrace_was_enabled )); then set -x; fi
 
 prompt() {
-  local label="$1"
-  local default_value="${2:-}"
-  local reply=""
-  if [ -t 0 ] && [ -r /dev/tty ]; then
-    if [ -n "$default_value" ]; then
-      printf '%s [%s]: ' "$label" "$default_value" >&2
-    else
-      printf '%s: ' "$label" >&2
+  (
+    case "$-" in *x*) set +x ;; esac
+    local label="$1" default_value="${2:-}" reply=""
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+      if [ -n "$default_value" ]; then
+        printf '%s [%s]: ' "$label" "$default_value" >&2
+      else
+        printf '%s: ' "$label" >&2
+      fi
+      read -r reply </dev/tty
     fi
-    read -r reply </dev/tty
-  fi
-  if [ -z "$reply" ]; then
-    reply="$default_value"
-  fi
-  printf '%s' "$reply"
+    if [ -z "$reply" ]; then reply="$default_value"; fi
+    printf '%s' "$reply"
+  )
 }
 
 prompt_secret() {
-  local label="$1"
-  local reply="" stty_state=""
-  if [ -t 0 ] && [ -r /dev/tty ]; then
-    printf '%s: ' "$label" >&2
-    stty_state="$(stty -g </dev/tty 2>/dev/null || true)"
-    stty -echo </dev/tty 2>/dev/null || true
-    read -r reply </dev/tty
-    if [ -n "$stty_state" ]; then
-      stty "$stty_state" </dev/tty 2>/dev/null || true
+  (
+    case "$-" in *x*) set +x ;; esac
+    local label="$1" reply="" stty_state=""
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+      printf '%s: ' "$label" >&2
+      stty_state="$(stty -g </dev/tty 2>/dev/null || true)"
+      stty -echo </dev/tty 2>/dev/null || true
+      read -r reply </dev/tty
+      if [ -n "$stty_state" ]; then
+        stty "$stty_state" </dev/tty 2>/dev/null || true
+      fi
+      printf '\n' >&2
     fi
-    printf '\n' >&2
-  fi
-  printf '%s' "$reply"
+    printf '%s' "$reply"
+  )
 }
 
 if [ -z "$BASE_DOMAIN" ] && [ ! -t 0 ]; then
@@ -641,6 +663,8 @@ generate_secret() {
 }
 
 prompt_optional() {
+  local xtrace_was_enabled=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   local var="$1"
   local label="$2"
   local default_value="${3:-}"
@@ -664,9 +688,12 @@ prompt_optional() {
   if [ "$DRY_RUN" != "1" ] && [ -n "$value" ]; then
     persist_env_value "$var" "$value"
   fi
+  if (( xtrace_was_enabled )); then set -x; fi
 }
 
 prompt_required() {
+  local xtrace_was_enabled=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   local var="$1"
   local label="$2"
   local value="${!var:-}"
@@ -679,6 +706,7 @@ prompt_required() {
     if [ -t 0 ] && [ -r /dev/tty ]; then
       value="$(prompt "$label" "")"
     else
+      if (( xtrace_was_enabled )); then set -x; fi
       die "$var is required. Export it or run the installer interactively."
     fi
   done
@@ -687,6 +715,7 @@ prompt_required() {
   if [ "$DRY_RUN" != "1" ]; then
     persist_env_value "$var" "$value"
   fi
+  if (( xtrace_was_enabled )); then set -x; fi
 }
 
 seed_daiana_env() {
@@ -710,20 +739,29 @@ seed_daiana_env() {
       changed=1
     fi
   }
-  ensure_secret() {
+ensure_secret() {
+    local function_xtrace_was_enabled=0
+    case "$-" in *x*) function_xtrace_was_enabled=1; set +x ;; esac
     local var="$1"
     local length="${2:-64}"
     if [ -z "${!var:-}" ]; then
       local value
-      value="$(generate_secret "$length")"
+      if ! value="$(generate_secret "$length")"; then
+        if (( function_xtrace_was_enabled )); then set -x; fi
+        return 1
+      fi
       printf -v "$var" '%s' "$value"
       export "${var?}"
       if [ "$DRY_RUN" != "1" ]; then
-        persist_env_value "$var" "$value"
+        if ! persist_env_value "$var" "$value"; then
+          if (( function_xtrace_was_enabled )); then set -x; fi
+          return 1
+        fi
       fi
       log "Generated $var"
       changed=1
     fi
+    if (( function_xtrace_was_enabled )); then set -x; fi
   }
   ensure_derived() {
     local var="$1"
@@ -801,6 +839,8 @@ prompt_missing BASE_DOMAIN
 [ -n "$BASE_DOMAIN" ] || die "BASE_DOMAIN is required"
 prompt_missing NPM_ADMIN_EMAIL 'admin@example.com'
 
+secret_generation_xtrace_was_enabled=0
+case "$-" in *x*) secret_generation_xtrace_was_enabled=1; set +x ;; esac
 if [ -z "$NPM_ADMIN_PASS" ]; then
   if [ -t 0 ]; then
     NPM_ADMIN_PASS="$(prompt 'NPM_ADMIN_PASS' "$(generate_password 20)")"
@@ -817,6 +857,7 @@ if [ -z "$PORTAINER_ADMIN_PASS" ]; then
     log "Generated PORTAINER_ADMIN_PASS automatically (non-interactive)"
   fi
 fi
+if (( secret_generation_xtrace_was_enabled )); then set -x; fi
 
 log "Prompting SMTP settings"
 prompt_optional SMTP_ADMIN_EMAIL 'SMTP_ADMIN_EMAIL (optional)' "$NPM_ADMIN_EMAIL"
@@ -868,6 +909,8 @@ fi
 export BASE_DOMAIN NPM_ADMIN_EMAIL NPM_ADMIN_PASS PORTAINER_ADMIN_USER PORTAINER_ADMIN_PASS STUDIO_BASE_URL EXPRESS_SESSION_SECRET JWT_AUTH_TOKEN_SECRET JWT_REFRESH_TOKEN_SECRET SMTP_ADMIN_EMAIL SMTP_PORT SMTP_SENDER_NAME SMTP_HOST SMTP_USER SMTP_PASS GOOGLE_CLIENT_ID GOOGLE_SECRET GOOGLE_ENABLED
 
 if [ "$DRY_RUN" != "1" ]; then
+  persist_secret_xtrace_was_enabled=0
+  case "$-" in *x*) persist_secret_xtrace_was_enabled=1; set +x ;; esac
   persist_env_value BASE_DOMAIN "$BASE_DOMAIN"
   persist_env_value NPM_ADMIN_EMAIL "$NPM_ADMIN_EMAIL"
   persist_env_value NPM_ADMIN_PASS "$NPM_ADMIN_PASS"
@@ -892,6 +935,7 @@ if [ "$DRY_RUN" != "1" ]; then
   persist_env_value EXPRESS_SESSION_SECRET "$EXPRESS_SESSION_SECRET"
   persist_env_value JWT_AUTH_TOKEN_SECRET "$JWT_AUTH_TOKEN_SECRET"
   persist_env_value JWT_REFRESH_TOKEN_SECRET "$JWT_REFRESH_TOKEN_SECRET"
+  if (( persist_secret_xtrace_was_enabled )); then set -x; fi
 fi
 
 render_compose() {
@@ -1156,76 +1200,281 @@ wait_for_http() {
   return 1
 }
 
+portainer_temp_cleanup() {
+  local file status=0
+  for file in "${PORTAINER_TEMP_FILES[@]:-}"; do
+    if [ -n "$file" ] && ! rm -f -- "$file" >/dev/null 2>&1; then
+      status=1
+    fi
+  done
+  return "$status"
+}
+
+portainer_run_saved_trap() {
+  local specification="$1" signal="$2" action
+  [ -n "$specification" ] || return 0
+  specification="${specification#trap -- }"
+  specification="${specification% "$signal"}"
+  eval "action=$specification"
+  eval "$action"
+}
+
+portainer_restore_temp_traps() {
+  local depth="${PORTAINER_TEMP_SCOPE_DEPTH:-0}" status=0
+  if [ -n "${PORTAINER_PREVIOUS_EXIT_TRAPS[$depth]:-}" ]; then
+    eval "${PORTAINER_PREVIOUS_EXIT_TRAPS[$depth]}" || status=1
+  else
+    trap - EXIT || status=1
+  fi
+  if [ -n "${PORTAINER_PREVIOUS_INT_TRAPS[$depth]:-}" ]; then
+    eval "${PORTAINER_PREVIOUS_INT_TRAPS[$depth]}" || status=1
+  else
+    trap - INT || status=1
+  fi
+  if [ -n "${PORTAINER_PREVIOUS_TERM_TRAPS[$depth]:-}" ]; then
+    eval "${PORTAINER_PREVIOUS_TERM_TRAPS[$depth]}" || status=1
+  else
+    trap - TERM || status=1
+  fi
+  if [ -n "${PORTAINER_PREVIOUS_HUP_TRAPS[$depth]:-}" ]; then
+    eval "${PORTAINER_PREVIOUS_HUP_TRAPS[$depth]}" || status=1
+  else
+    trap - HUP || status=1
+  fi
+  return "$status"
+}
+
+portainer_temp_trap() {
+  local signal="$1" status=$? previous_trap="" cleanup_status=0 restore_status=0 previous_status=0
+  case "$signal" in
+    INT) status=130 ;;
+    TERM) status=143 ;;
+    HUP) status=129 ;;
+  esac
+  portainer_temp_cleanup || cleanup_status=$?
+  portainer_restore_temp_traps || restore_status=$?
+  case "$signal" in
+    EXIT)
+      portainer_run_saved_trap "${PORTAINER_PREVIOUS_EXIT_TRAPS[${PORTAINER_TEMP_SCOPE_DEPTH:-0}]:-}" EXIT || previous_status=$?
+      [ "$cleanup_status" -eq 0 ] || printf 'WARNING: Portainer temporary-file cleanup failed\n' >&2
+      [ "$restore_status" -eq 0 ] || printf 'WARNING: Portainer trap restoration failed\n' >&2
+      [ "$previous_status" -eq 0 ] || return "$previous_status"
+      [ "$cleanup_status" -eq 0 ] || return "$cleanup_status"
+      [ "$restore_status" -eq 0 ] || return "$restore_status"
+      return "$status"
+      ;;
+    *)
+      case "$signal" in
+         INT) previous_trap="${PORTAINER_PREVIOUS_INT_TRAPS[${PORTAINER_TEMP_SCOPE_DEPTH:-0}]:-}" ;;
+         TERM) previous_trap="${PORTAINER_PREVIOUS_TERM_TRAPS[${PORTAINER_TEMP_SCOPE_DEPTH:-0}]:-}" ;;
+         HUP) previous_trap="${PORTAINER_PREVIOUS_HUP_TRAPS[${PORTAINER_TEMP_SCOPE_DEPTH:-0}]:-}" ;;
+       esac
+      portainer_run_saved_trap "$previous_trap" "$signal" || previous_status=$?
+      [ "$cleanup_status" -eq 0 ] || printf 'WARNING: Portainer temporary-file cleanup failed\n' >&2
+      [ "$restore_status" -eq 0 ] || printf 'WARNING: Portainer trap restoration failed\n' >&2
+      [ "$previous_status" -eq 0 ] || status="$previous_status"
+      [ "$cleanup_status" -eq 0 ] || status="$cleanup_status"
+      [ "$restore_status" -eq 0 ] || status="$restore_status"
+      exit "$status"
+      ;;
+  esac
+}
+
+portainer_begin_temp_scope() {
+  local depth="${PORTAINER_TEMP_SCOPE_DEPTH:--1}"
+  depth=$((depth + 1))
+  PORTAINER_TEMP_SCOPE_DEPTH="$depth"
+  PORTAINER_PREVIOUS_EXIT_TRAPS[depth]="$(trap -p EXIT)"
+  PORTAINER_PREVIOUS_INT_TRAPS[depth]="$(trap -p INT)"
+  PORTAINER_PREVIOUS_TERM_TRAPS[depth]="$(trap -p TERM)"
+  PORTAINER_PREVIOUS_HUP_TRAPS[depth]="$(trap -p HUP)"
+  trap 'portainer_temp_trap EXIT' EXIT
+  trap 'portainer_temp_trap INT' INT
+  trap 'portainer_temp_trap TERM' TERM
+  trap 'portainer_temp_trap HUP' HUP
+}
+
+portainer_end_temp_scope() {
+  local status=$?
+  local cleanup_status=0 restore_status=0
+  portainer_temp_cleanup || cleanup_status=$?
+  portainer_restore_temp_traps || restore_status=$?
+  [ "$cleanup_status" -eq 0 ] || printf 'WARNING: Portainer temporary-file cleanup failed\n' >&2
+  [ "$restore_status" -eq 0 ] || printf 'WARNING: Portainer trap restoration failed\n' >&2
+  PORTAINER_TEMP_SCOPE_DEPTH=$((PORTAINER_TEMP_SCOPE_DEPTH - 1))
+  [ "$status" -eq 0 ] || return "$status"
+  [ "$cleanup_status" -eq 0 ] || return "$cleanup_status"
+  [ "$restore_status" -eq 0 ] || return "$restore_status"
+  return "$status"
+}
+
+portainer_temp_create() {
+  local variable="$1" file="" allocator_status=0
+  file="$(mktemp)" || allocator_status=$?
+  # Some adversarial/test allocators create and print a path before returning
+  # failure. Register that path before propagating the allocator status.
+  if [ -n "$file" ]; then
+    PORTAINER_TEMP_FILES+=("$file")
+  fi
+  [ "$allocator_status" -eq 0 ] || return "$allocator_status"
+  [ -n "$file" ] || return 1
+  chmod 600 "$file" || return $?
+  printf -v "$variable" '%s' "$file" || return 1
+}
+
 portainer_request_json() {
-  local method="$1"
-  local path="$2"
-  local data="${3:-}"
-  local response status body
-  local args=( -sS -X "$method" "$PORTAINER_URL$path" -H 'Content-Type: application/json' )
-  if [ -n "${PORTAINER_TOKEN:-}" ]; then
-    args+=( -H "Authorization: Bearer $PORTAINER_TOKEN" )
-  fi
-  if [ -n "$data" ]; then
-    args+=( -d "$data" )
-  fi
-  response="$(curl "${args[@]}" -w '\n%{http_code}' || true)"
+  (
+    case "$-" in *x*) set +x ;; esac
+    local method="$1" path="$2" data="${3:-}" tmp
+    local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+    local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+    portainer_begin_temp_scope
+    portainer_temp_create tmp || return $?
+    printf '%s' "$data" > "$tmp" || return $?
+    portainer_request_json_file "$method" "$path" "$tmp" || return $?
+  )
+}
+
+portainer_request_json_file() {
+  (
+    case "$-" in *x*) set +x ;; esac
+    local method="$1" path="$2" data_file="${3:-}" allowed_status="${4:-}" response status body config curl_status=0
+    local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+    local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+    portainer_begin_temp_scope
+    portainer_temp_create config || return $?
+    {
+      printf 'silent\nshow-error\nrequest = "%s"\nurl = "%s"\n' "$method" "$PORTAINER_URL$path" || return $?
+      printf 'header = "Content-Type: application/json"\n' || return $?
+      if [ -n "${PORTAINER_TOKEN:-}" ]; then
+        printf 'header = "Authorization: Bearer %s"\n' "$PORTAINER_TOKEN" || return $?
+      fi
+      if [ -n "$data_file" ]; then
+        printf 'data-binary = "@%s"\n' "$data_file" || return $?
+      fi
+    } > "$config" || return $?
+    response="$(curl --config "$config" -w '\n%{http_code}')" || curl_status=$?
+    if [ "$curl_status" -ne 0 ]; then
+      echo "Portainer $method $path failed (HTTP ${response##*$'\n'})" >&2
+      return "$curl_status"
+    fi
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
-  if [[ "$status" != 2* ]]; then
-    echo "Portainer $method $path failed (HTTP $status):" >&2
-    echo "$body" >&2
+  if [[ "$status" != 2* && "$status" != "$allowed_status" ]]; then
+    if [ -n "$allowed_status" ]; then
+      printf '%s\n%s' "$body" "$status"
+    else
+      echo "Portainer $method $path failed (HTTP $status)" >&2
+    fi
     return 1
   fi
-  printf '%s' "$body"
+  if [ -n "$allowed_status" ]; then
+    printf '%s\n%s' "$body" "$status" || return $?
+  else
+    printf '%s' "$body" || return $?
+  fi
+  )
+}
+
+portainer_request_json_file_with_status() {
+  local allowed_status="${4:-}"
+  local response body status request_status=0
+  if response="$(portainer_request_json_file "$1" "$2" "$3" "$allowed_status")"; then
+    :
+  else
+    request_status=$?
+  fi
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  printf '%s\n%s' "$body" "$status"
+  return "$request_status"
 }
 
 portainer_request_form() {
-  local method="$1"
-  local path="$2"
-  shift 2
-  local response status body
-  local args=( -sS -X "$method" "$PORTAINER_URL$path" )
-  if [ -n "${PORTAINER_TOKEN:-}" ]; then
-    args+=( -H "Authorization: Bearer $PORTAINER_TOKEN" )
-  fi
-  response="$(curl "${args[@]}" "$@" -w '\n%{http_code}' || true)"
+  (
+    case "$-" in *x*) set +x ;; esac
+    local method="$1" path="$2" response status body config curl_status=0
+    local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+    local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+    portainer_begin_temp_scope
+    shift 2
+    portainer_temp_create config || return $?
+    {
+      printf 'silent\nshow-error\nrequest = "%s"\nurl = "%s"\n' "$method" "$PORTAINER_URL$path" || return $?
+      if [ -n "${PORTAINER_TOKEN:-}" ]; then
+        printf 'header = "Authorization: Bearer %s"\n' "$PORTAINER_TOKEN" || return $?
+      fi
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --form) printf 'form = "%s"\n' "$2" || return $?; shift 2 ;;
+          *) printf 'url = "%s"\n' "$1" || return $?; shift ;;
+        esac
+      done
+    } > "$config" || return $?
+    response="$(curl --config "$config" -w '\n%{http_code}')" || curl_status=$?
+    if [ "$curl_status" -ne 0 ]; then
+      echo "Portainer $method $path failed (HTTP ${response##*$'\n'})" >&2
+      return "$curl_status"
+    fi
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
   if [[ "$status" != 2* ]]; then
-    echo "Portainer $method $path failed (HTTP $status):" >&2
-    echo "$body" >&2
+    echo "Portainer $method $path failed (HTTP $status)" >&2
     return 1
   fi
-  printf '%s' "$body"
+  printf '%s' "$body" || return $?
+  )
 }
 
-portainer_admin_init() {
-  local response status body
-  response="$(curl -sS -X POST "$PORTAINER_URL/api/users/admin/init" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg u "$PORTAINER_ADMIN_USER" --arg p "$PORTAINER_ADMIN_PASS" '{Username:$u,Password:$p}')" \
-    -w '\n%{http_code}' || true)"
+portainer_admin_init() (
+  local response status body payload user_file pass_file xtrace_was_enabled=0 request_status=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  portainer_temp_create payload || return $?
+  portainer_temp_create user_file || return $?
+  portainer_temp_create pass_file || return $?
+  printf '%s' "$PORTAINER_ADMIN_USER" > "$user_file" || return $?
+  printf '%s' "$PORTAINER_ADMIN_PASS" > "$pass_file" || return $?
+  jq -n --rawfile u "$user_file" --rawfile p "$pass_file" '{Username:$u,Password:$p}' > "$payload" || return $?
+  response="$(portainer_request_json_file_with_status POST /api/users/admin/init "$payload" 409)" || request_status=$?
   status="${response##*$'\n'}"
   body="${response%$'\n'*}"
   if [ "$status" = "409" ]; then
     log "Portainer admin already initialized"
+    if (( xtrace_was_enabled )); then set -x; fi
     return 0
   fi
   if [[ "$status" != 2* ]]; then
-    echo "Portainer POST /api/users/admin/init failed (HTTP $status):" >&2
-    echo "$body" >&2
+    echo "Portainer POST /api/users/admin/init failed (HTTP $status)" >&2
+    if (( xtrace_was_enabled )); then set -x; fi
     return 1
   fi
-}
+  [ "$request_status" -eq 0 ] || return "$request_status"
+  if (( xtrace_was_enabled )); then set -x; fi
+)
 
-portainer_token() {
-  local saved_token="${PORTAINER_TOKEN:-}"
+portainer_token() (
+  local saved_token token xtrace_was_enabled=0 payload user_file pass_file token_status=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  saved_token="${PORTAINER_TOKEN:-}"
   PORTAINER_TOKEN=""
-  local token
-  token="$(portainer_request_json POST /api/auth "$(jq -n --arg u "$PORTAINER_ADMIN_USER" --arg p "$PORTAINER_ADMIN_PASS" '{Username:$u,Password:$p}')" | jq -r '.jwt // .JWT // empty')"
+  portainer_temp_create payload || return $?
+  portainer_temp_create user_file || return $?
+  portainer_temp_create pass_file || return $?
+  printf '%s' "$PORTAINER_ADMIN_USER" > "$user_file" || return $?
+  printf '%s' "$PORTAINER_ADMIN_PASS" > "$pass_file" || return $?
+  jq -n --rawfile u "$user_file" --rawfile p "$pass_file" '{Username:$u,Password:$p}' > "$payload" || return $?
+  token="$(portainer_request_json_file POST /api/auth "$payload" | jq -er '(.jwt // .JWT) | select(type == "string" and length > 0)')" || token_status=$?
   PORTAINER_TOKEN="$saved_token"
-  printf '%s' "$token"
-}
+  [ "$token_status" -eq 0 ] || return "$token_status"
+  printf '%s' "$token" || return $?
+  if (( xtrace_was_enabled )); then set -x; fi
+)
 
 portainer_get() {
   local path="$1"
@@ -1234,68 +1483,165 @@ portainer_get() {
 
 portainer_registry_id() {
   local registry_name="$1"
-  portainer_get '/api/registries' | jq -r --arg name "$registry_name" '
-    (if type == "object" and has("data") then .data else . end)
-    | .[]?
-    | select(.Name == $name or .Name == "daiana-images" or ((.URL == "docker.io" or .URL == "registry-1.docker.io") and .Type == 6))
-    | .Id
-  ' | head -n1
+  local response body status registry_id
+  if ! response="$(portainer_request_json_file_with_status GET /api/registries '' 404)"; then
+    return 1
+  fi
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [ "$status" = "404" ]; then
+    return 0
+  fi
+  [[ "$status" == 2* ]] || return 1
+   if ! printf '%s' "$body" | jq -e '
+     (if type == "object" and has("data") then .data else . end)
+     | type == "array"
+   ' >/dev/null
+   then
+     return 1
+   fi
+   if ! registry_id="$(printf '%s' "$body" | jq -r --arg name "$registry_name" '
+     (if type == "object" and has("data") then .data else . end)
+     | first(.[] | select(.Name == $name or .Name == "daiana-images" or ((.URL == "docker.io" or .URL == "registry-1.docker.io") and .Type == 6)) | (.Id // .id)) // empty
+   ')"; then
+    return 1
+  fi
+  if [ -n "$registry_id" ] && ! [[ "$registry_id" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  printf '%s' "$registry_id"
+}
+
+portainer_validate_registry_creation_response() {
+  local response="$1" registry_id raw_id
+  if ! registry_id="$(printf '%s' "$response" | jq -e -r -s '
+    if length != 1 then error("expected exactly one JSON value")
+    elif (.[0] | type) != "object" then error("expected a JSON object")
+    else
+      (.[0].Id // .[0].id) as $id
+      | if ($id | type) != "number" then error("registry ID is not numeric")
+        elif ($id | isfinite | not) or ($id != ($id | floor)) then error("registry ID is not an integer")
+        elif $id <= 0 or $id > 9007199254740991 then error("registry ID is outside the safe range")
+        else ($id | tostring)
+        end
+      end
+  ')"; then
+    return 1
+  fi
+  if [[ "$response" =~ \"Id\"[[:space:]]*:[[:space:]]*([^,\}[:space:]]+) ]]; then
+    raw_id="${BASH_REMATCH[1]}"
+  elif [[ "$response" =~ \"id\"[[:space:]]*:[[:space:]]*([^,\}[:space:]]+) ]]; then
+    raw_id="${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+  [ "$raw_id" = "$registry_id" ] || return 1
+  [[ "$registry_id" =~ ^[1-9][0-9]*$ ]] || return 1
+  printf '%s' "$registry_id"
 }
 
 portainer_ensure_private_registry() {
+  local xtrace_was_enabled=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   local registry_name="$DAIANA_REGISTRY_NAME"
   local registry_id=""
-  registry_id="$(portainer_registry_id "$registry_name" || true)"
+  if ! registry_id="$(portainer_registry_id "$registry_name")"; then
+    if (( xtrace_was_enabled )); then set -x; fi
+    # shellcheck disable=SC2317 # test doubles may return from die.
+    die 'Could not look up Portainer private registry' || return $?
+  fi
   if [ -n "$registry_id" ] && [ "$registry_id" != "null" ]; then
-    printf '[%s]' "$registry_id"
+    # shellcheck disable=SC2034 # consumed through Bash 3.2 indirect expansion
+    PORTAINER_DAIA_REGISTRIES_JSON="[$registry_id]"
+    if (( xtrace_was_enabled )); then set -x; fi
     return 0
   fi
 
-  local registry_user="${DAIANA_REGISTRY_USERNAME:-}"
-  local registry_pat="${DAIANA_REGISTRY_PAT:-}"
+   local registry_user="${DAIANA_REGISTRY_USERNAME:-}"
+   local registry_pat="${DAIANA_REGISTRY_PAT:-}"
   if [ -z "$registry_user" ]; then
     registry_user="$(prompt 'Docker Hub username for private Daiana images' '')"
   fi
   if [ -z "$registry_pat" ]; then
     registry_pat="$(prompt_secret 'Docker Hub PAT for private Daiana images')"
   fi
-  [ -n "$registry_user" ] || die 'Docker Hub username is required for private Daiana images'
-  [ -n "$registry_pat" ] || die 'Docker Hub PAT is required for private Daiana images'
+   [ -n "$registry_user" ] || { if (( xtrace_was_enabled )); then set -x; fi; die 'Docker Hub username is required for private Daiana images'; }
+   [ -n "$registry_pat" ] || { if (( xtrace_was_enabled )); then set -x; fi; die 'Docker Hub PAT is required for private Daiana images'; }
+   # Keep prompted credentials separate from caller variables.  The callers
+   # below pass these values only while xtrace is disabled.
+   PORTAINER_PRIVATE_REGISTRY_USERNAME="$registry_user"
+   PORTAINER_PRIVATE_REGISTRY_PAT="$registry_pat"
 
-  DAIANA_REGISTRY_USERNAME="$registry_user"
-  DAIANA_REGISTRY_PAT="$registry_pat"
-
-  local body
-  body="$(jq -n \
-    --arg name "$registry_name" \
-    --arg username "$registry_user" \
-    --arg password "$registry_pat" \
-    '{Name:$name, URL:"docker.io", Type:6, Authentication:true, Username:$username, Password:$password}')"
-  registry_id="$(portainer_request_json POST /api/registries "$body" | jq -r '.Id // .id // empty')"
-  [ -n "$registry_id" ] || die 'Could not create Portainer registry for private Daiana images'
-  printf '[%s]' "$registry_id"
+  local body user_file pat_file name_file
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  local status=0 cleanup_status=0
+  while :; do
+    portainer_temp_create body || { status=$?; break; }
+    portainer_temp_create user_file || { status=$?; break; }
+    portainer_temp_create pat_file || { status=$?; break; }
+    portainer_temp_create name_file || { status=$?; break; }
+    printf '%s' "$registry_name" > "$name_file" || { status=$?; break; }
+    printf '%s' "$registry_user" > "$user_file" || { status=$?; break; }
+    printf '%s' "$registry_pat" > "$pat_file" || { status=$?; break; }
+    # shellcheck disable=SC2031 # body is written and consumed inside the same protected scope.
+    jq -n --rawfile name "$name_file" --rawfile username "$user_file" --rawfile password "$pat_file" \
+      '{Name:$name, URL:"docker.io", Type:6, Authentication:true, Username:$username, Password:$password}' > "$body" \
+      || { status=$?; break; }
+    # shellcheck disable=SC2031 # body is written and consumed inside the same protected scope.
+    local creation_response
+    creation_response="$(portainer_request_json_file POST /api/registries "$body")" \
+      || { status=$?; break; }
+    if ! registry_id="$(portainer_validate_registry_creation_response "$creation_response")"; then
+      if (( xtrace_was_enabled )); then set -x; fi
+      # shellcheck disable=SC2317 # die exits in production; test doubles may return.
+      die 'Could not create Portainer registry for private Daiana images' || status=$?
+      # shellcheck disable=SC2317 # reachable when the test double for die returns.
+      break
+    fi
+    # shellcheck disable=SC2034 # consumed through Bash 3.2 indirect expansion
+    PORTAINER_DAIA_REGISTRIES_JSON="[$registry_id]"
+    break
+  done
+  portainer_end_temp_scope || cleanup_status=$?
+  if (( xtrace_was_enabled )); then set -x; fi
+  [ "$status" -eq 0 ] || return "$status"
+  [ "$cleanup_status" -eq 0 ] || return "$cleanup_status"
+  return 0
 }
 
 docker_login_private_registry() {
-  local registry_user="${DAIANA_REGISTRY_USERNAME:-}"
-  local registry_pat="${DAIANA_REGISTRY_PAT:-}"
+  (
+  case "$-" in *x*) set +x ;; esac
+  local registry_user="${1:-${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}}"
+  local registry_pat="${2:-${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}}"
   [ -n "$registry_user" ] || return 0
   [ -n "$registry_pat" ] || return 0
 
   log "Authenticating local Docker client to Docker Hub for private Daiana images"
   printf '%s' "$registry_pat" | docker_cmd login docker.io --username "$registry_user" --password-stdin >/dev/null
+  )
 }
 
-prepull_daiana_images() {
+prepull_daiana_images() (
+  # Use a subshell so the caller's xtrace state is restored even when a mock
+  # or command below returns early.  Disable xtrace before expanding any
+  # credential-bearing argument or default.
+  local xtrace_was_enabled=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
+  local registry_user="${1:-${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}}"
+  local registry_pat="${2:-${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}}"
   log "Pre-pulling private Daiana images"
-  docker_login_private_registry
+  docker_login_private_registry "$registry_user" "$registry_pat"
+  if (( xtrace_was_enabled )); then set -x; fi
   local args=()
   local file
   for file in "${APP_DEPLOY_COMPOSE_FILES[@]}"; do
     args+=( -f "$file" )
   done
   "${COMPOSE_CMD[@]}" "${args[@]}" pull
-}
+)
 
 portainer_endpoint_id() {
   portainer_get '/api/endpoints' | jq -r '
@@ -1335,40 +1681,86 @@ portainer_stack_id() {
   ' | head -n1
 }
 
-portainer_upsert_stack() {
+portainer_upsert_stack() (
+  case "$-" in *x*) set +x ;; esac
   local stack_name="$1"
-  local stack_env_json="$2"
-  local stack_registries_json="${3:-}"
+  local stack_env_file="$2"
+  local stack_registries_file="${3:-}"
   shift 3
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
   local stack_file
-  stack_file="$(mktemp)"
-  render_compose "$stack_file" "$@"
+  portainer_temp_create stack_file || return $?
+  render_compose "$stack_file" "$@" || return $?
+  portainer_submit_stack_file "$stack_name" "$stack_env_file" "$stack_registries_file" "$stack_file" || return $?
+)
 
-  portainer_submit_stack_file "$stack_name" "$stack_env_json" "$stack_registries_json" "$stack_file"
-  rm -f "$stack_file"
-}
+portainer_upsert_stack_from_vars() (
+  case "$-" in *x*) set +x ;; esac
+  local stack_name="$1" env_var="$2" registry_var="$3"
+  shift 3
+  local env_file registry_file
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  portainer_temp_create env_file || return $?
+  portainer_temp_create registry_file || return $?
+  printf '%s' "${!env_var}" > "$env_file" || return $?
+  printf '%s' "${!registry_var:-}" > "$registry_file" || return $?
+  portainer_upsert_stack "$stack_name" "$env_file" "$registry_file" "$@" || return $?
+)
 
-portainer_submit_stack_file() {
+portainer_submit_stack_file() (
+  case "$-" in *x*) set +x ;; esac
   local stack_name="$1"
-  local stack_env_json="$2"
-  local stack_registries_json="${3:-}"
+  local stack_env_file="$2"
+  local stack_registries_file="${3:-}"
   local stack_file="$4"
   local body
-  body="$(jq -Rs --arg name "$stack_name" --argjson env "$stack_env_json" --arg registries "$stack_registries_json" '
-    {Name:$name, StackFileContent:., Env:$env}
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  if ! body="$(jq -Rs --arg name "$stack_name" --slurpfile env "$stack_env_file" --rawfile registries "$stack_registries_file" '
+    {Name:$name, StackFileContent:., Env:$env[0]}
     + (if $registries != "" then {Registries:$registries} else {} end)
-  ' < "$stack_file")"
+  ' < "$stack_file")"; then
+    printf 'Portainer stack payload generation failed\n' >&2
+    return 1
+  fi
   local stack_id
   stack_id="$(portainer_stack_id "$stack_name" || true)"
 
   if [ -n "$stack_id" ] && [ "$stack_id" != "null" ]; then
     log "Updating Portainer stack: $stack_name (id=$stack_id)"
-    portainer_request_json PUT "/api/stacks/$stack_id?endpointId=$PORTAINER_ENDPOINT_ID" "$body" >/dev/null
+    local body_file
+    portainer_temp_create body_file || return $?
+    printf '%s' "$body" > "$body_file" || return $?
+    portainer_request_json_file PUT "/api/stacks/$stack_id?endpointId=$PORTAINER_ENDPOINT_ID" "$body_file" >/dev/null || return $?
   else
     log "Creating Portainer stack: $stack_name"
-    portainer_request_json POST "/api/stacks/create/standalone/string?endpointId=$PORTAINER_ENDPOINT_ID" "$body" >/dev/null
+    local body_file
+    portainer_temp_create body_file || return $?
+    printf '%s' "$body" > "$body_file" || return $?
+    portainer_request_json_file POST "/api/stacks/create/standalone/string?endpointId=$PORTAINER_ENDPOINT_ID" "$body_file" >/dev/null || return $?
   fi
-}
+)
+
+portainer_rollback_stack() (
+  case "$-" in *x*) set +x ;; esac
+  local stack_name="$1" env_var="$2" registry_var="$3" stack_file="$4"
+  local env_file registry_file stack_temp_file
+  local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
+  local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
+  portainer_begin_temp_scope
+  portainer_temp_create env_file || return $?
+  portainer_temp_create registry_file || return $?
+  portainer_temp_create stack_temp_file || return $?
+  printf '%s' "${!env_var}" > "$env_file" || return $?
+  printf '%s' "${!registry_var:-}" > "$registry_file" || return $?
+  cat "$stack_file" > "$stack_temp_file" || return $?
+  portainer_submit_stack_file "$stack_name" "$env_file" "$registry_file" "$stack_temp_file" || return $?
+)
 
 ensure_network() {
   if ! docker_cmd network inspect daiana-mgmt >/dev/null 2>&1; then
@@ -1492,8 +1884,17 @@ bootstrap_portainer() {
     portainer_admin_init
   fi
 
-  PORTAINER_TOKEN="$(portainer_token)"
-  [ -n "$PORTAINER_TOKEN" ] || die "Could not authenticate to Portainer"
+  portainer_token_status=0
+  portainer_token_xtrace_was_enabled=0
+  case "$-" in *x*) portainer_token_xtrace_was_enabled=1; set +x ;; esac
+  if PORTAINER_TOKEN="$(portainer_token)"; then
+    portainer_token_status=0
+  else
+    portainer_token_status=$?
+  fi
+  [ "$portainer_token_status" -eq 0 ] || { if (( portainer_token_xtrace_was_enabled )); then set -x; fi; die "Could not authenticate to Portainer"; }
+  [ -n "$PORTAINER_TOKEN" ] || { if (( portainer_token_xtrace_was_enabled )); then set -x; fi; die "Could not authenticate to Portainer"; }
+  if (( portainer_token_xtrace_was_enabled )); then set -x; fi
   PORTAINER_ENDPOINT_ID="$(portainer_ensure_endpoint)"
   [ -n "$PORTAINER_ENDPOINT_ID" ] || die "Could not determine Portainer endpoint id"
 }
@@ -1554,21 +1955,38 @@ wait_for_supabase_ready() {
   return 1
 }
 
-postgres_connection_uri() {
-  [ -n "${POOLER_TENANT_ID:-}" ] || die "POOLER_TENANT_ID is required to run init SQL"
-  [ -n "${POSTGRES_PASSWORD:-}" ] || die "POSTGRES_PASSWORD is required to run init SQL"
-  [ -n "${POSTGRES_PORT:-}" ] || die "POSTGRES_PORT is required to run init SQL"
-  [ -n "${POSTGRES_DB:-}" ] || die "POSTGRES_DB is required to run init SQL"
-  local host="${SUPABASE_DB_HOST:-supabase-pooler}"
-  [ -n "$host" ] || die "Could not determine the Supabase DB host for init SQL"
-  printf 'postgresql://postgres.%s:%s@%s:%s/%s' "$POOLER_TENANT_ID" "$POSTGRES_PASSWORD" "$host" "$POSTGRES_PORT" "$POSTGRES_DB"
+psql_with_password() {
+  local db_user="$1"
+  shift
+  local xtrace_was_enabled=0 psql_status=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
+  { printf '%s\n' "$POSTGRES_PASSWORD"; } | docker_cmd exec -i supabase-db \
+    sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' sh \
+    -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" "$@" || psql_status=$?
+  if (( xtrace_was_enabled )); then set -x; fi
+  return "$psql_status"
+}
+
+psql_file_with_password() {
+  local db_user="$1"
+  local file="$2"
+  shift 2
+  local xtrace_was_enabled=0 psql_status=0
+  case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
+  { printf '%s\n' "$POSTGRES_PASSWORD"; cat "$file"; } | docker_cmd exec -i supabase-db \
+    sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' sh \
+    -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" "$@" -v ON_ERROR_STOP=1 -f /dev/stdin || psql_status=$?
+  if (( xtrace_was_enabled )); then set -x; fi
+  return "$psql_status"
 }
 
 psql_scalar() {
   local db_user="$1"
   local query="$2"
   local output
-  if ! output="$(docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -Atqc "$query" 2>&1)"; then
+  if output="$(psql_with_password "$db_user" -Atqc "$query" 2>&1)"; then
+    :
+  else
     printf '__PSQL_ERROR__:%s' "$output"
     return 0
   fi
@@ -1631,8 +2049,7 @@ run_psql_file() {
   local schema="$1"
   local db_user="$2"
   local file="$3"
-  local uri="$4"
-  shift 4
+  shift 3
   local tables=""
   local psql_vars=()
 
@@ -1644,27 +2061,26 @@ run_psql_file() {
   done
 
   if [ "$schema" != "-" ] && [ -n "$schema" ]; then
-    tables="$(docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -Atqc "$(schema_tables_for_truncate_query "$schema")")"
+    tables="$(psql_with_password "$db_user" -Atqc "$(schema_tables_for_truncate_query "$schema")")"
     if [ -n "$tables" ]; then
-      docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "TRUNCATE $tables RESTART IDENTITY CASCADE"
+      psql_with_password "$db_user" -v ON_ERROR_STOP=1 -c "TRUNCATE $tables RESTART IDENTITY CASCADE"
     fi
   fi
   if [ "${#psql_vars[@]}" -gt 0 ]; then
-    docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" "${psql_vars[@]}" -v ON_ERROR_STOP=1 -f /dev/stdin < "$file"
+    psql_file_with_password "$db_user" "$file" "${psql_vars[@]}"
   else
-    docker_cmd exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db psql -h 127.0.0.1 -U "$db_user" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /dev/stdin < "$file"
+    psql_file_with_password "$db_user" "$file"
   fi
 }
 
 run_supabase_init_sql() {
   local sentinel=".atl/install-daiana.init-sql.done"
-  local uri entry schema file
+  local entry schema file
   if [ -f "$sentinel" ]; then
     log "Supabase data seed SQL already applied; skipping"
     return 0
   fi
 
-  uri="$(postgres_connection_uri)"
   wait_for_supabase_auth_migrations 120 2 || die "Supabase Auth migrations did not finish before data seed SQL"
   local sql_files=(
     "auth:supabase_admin:volumes/db/init/auth.sql"
@@ -1698,10 +2114,10 @@ run_supabase_init_sql() {
           next_public_app_url "$NEXT_PUBLIC_APP_URL"
           cors_allow_origin "$CORS_ALLOW_ORIGIN"
         )
-        run_psql_file "$schema" "$db_user" "$file" "$uri" "${vault_psql_vars[@]}"
+        run_psql_file "$schema" "$db_user" "$file" "${vault_psql_vars[@]}"
         ;;
       *)
-        run_psql_file "$schema" "$db_user" "$file" "$uri"
+        run_psql_file "$schema" "$db_user" "$file"
         ;;
     esac
   done
@@ -1780,7 +2196,9 @@ if [ "$ROLLBACK_MODE" = "1" ]; then
   NPM_STACK_ENV_JSON='[]'
   APP_STACK_ENV_JSON="$ROLLBACK_STACK_ENV_JSON"
 else
+  # shellcheck disable=SC2034 # consumed through Bash 3.2 indirect expansion
   NPM_STACK_ENV_JSON="$(stack_env_json docker-compose.npm.yml)"
+  # shellcheck disable=SC2034 # consumed through Bash 3.2 indirect expansion
   APP_STACK_ENV_JSON="$(stack_env_json "${APP_DEPLOY_COMPOSE_FILES[@]}")"
 fi
 
@@ -1789,17 +2207,31 @@ if [ "$ACTION" = "update" ]; then
   report_daiana_versions
   CURRENT_PHASE="connecting to Portainer"
   wait_for_http "$PORTAINER_URL/api/status" "Portainer API" 180 2 || die "Portainer API did not become ready"
-  PORTAINER_TOKEN="$(portainer_token)"
-  [ -n "$PORTAINER_TOKEN" ] || die "Could not authenticate to Portainer"
+  portainer_token_status=0
+  portainer_token_xtrace_was_enabled=0
+  case "$-" in *x*) portainer_token_xtrace_was_enabled=1; set +x ;; esac
+  if PORTAINER_TOKEN="$(portainer_token)"; then
+    portainer_token_status=0
+  else
+    portainer_token_status=$?
+  fi
+  [ "$portainer_token_status" -eq 0 ] || { if (( portainer_token_xtrace_was_enabled )); then set -x; fi; die "Could not authenticate to Portainer"; }
+  [ -n "$PORTAINER_TOKEN" ] || { if (( portainer_token_xtrace_was_enabled )); then set -x; fi; die "Could not authenticate to Portainer"; }
+  if (( portainer_token_xtrace_was_enabled )); then set -x; fi
   PORTAINER_ENDPOINT_ID="$(portainer_ensure_endpoint)"
   [ -n "$PORTAINER_ENDPOINT_ID" ] || die "Could not determine Portainer endpoint id"
   if [ "$ROLLBACK_MODE" = "1" ]; then
     log "Preparing private registry access for Daiana images"
-    PORTAINER_DAIA_REGISTRIES_JSON="$(portainer_ensure_private_registry)"
+    portainer_ensure_private_registry
     CURRENT_PHASE="pre-pulling rollback images"
-    prepull_daiana_images || warn "Could not pre-pull rollback images; Portainer may still require registry access"
+    prepull_status=0
+    prepull_xtrace_was_enabled=0
+    case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
+    prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
+    if (( prepull_xtrace_was_enabled )); then set -x; fi
+    [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull rollback images; Portainer may still require registry access"
     log "Rolling back Daiana app stack via Portainer"
-    portainer_submit_stack_file "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
+    portainer_rollback_stack "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
     cat <<EOF
 
 Rollback complete.
@@ -1817,11 +2249,11 @@ else
 fi
 
 log "Deploying NPM stack via Portainer"
-portainer_upsert_stack "$NPM_STACK_NAME" "$NPM_STACK_ENV_JSON" "" docker-compose.npm.yml
+portainer_upsert_stack_from_vars "$NPM_STACK_NAME" NPM_STACK_ENV_JSON EMPTY_REGISTRIES_VAR docker-compose.npm.yml
 
 if [ "$ACTION" = "install" ]; then
   log "Deploying core Supabase stack via Portainer"
-  portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "" "${SUPABASE_COMPOSE_FILES[@]}"
+  portainer_upsert_stack_from_vars "$APP_STACK_NAME" APP_STACK_ENV_JSON EMPTY_REGISTRIES_VAR "${SUPABASE_COMPOSE_FILES[@]}"
   CURRENT_PHASE="waiting for core Supabase"
   wait_for_supabase_ready 240 2 || die "Supabase core did not become ready"
   run_supabase_init_sql
@@ -1840,20 +2272,25 @@ log "Applying Flowise storage ownership"
 ensure_flowise_storage_permissions
 
 log "Preparing private registry access for Daiana images"
-PORTAINER_DAIA_REGISTRIES_JSON="$(portainer_ensure_private_registry)"
+portainer_ensure_private_registry
 
 CURRENT_PHASE="pre-pulling Daiana images"
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   prepull_deployment_bundle_images
 else
-  prepull_daiana_images || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
+  prepull_status=0
+  prepull_xtrace_was_enabled=0
+  case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
+  prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
+  if (( prepull_xtrace_was_enabled )); then set -x; fi
+  [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
 fi
 
 log "Deploying Daiana app stack via Portainer"
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   log "Complete deployment bundle replacement start: sha256:$BUNDLE_SHA256; rollback snapshot=$LAST_UPDATE_SNAPSHOT_DIR"
 fi
-portainer_upsert_stack "$APP_STACK_NAME" "$APP_STACK_ENV_JSON" "$PORTAINER_DAIA_REGISTRIES_JSON" "${APP_DEPLOY_COMPOSE_FILES[@]}"
+portainer_upsert_stack_from_vars "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "${APP_DEPLOY_COMPOSE_FILES[@]}"
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   log "Complete deployment bundle replacement finish: sha256:$BUNDLE_SHA256"
 fi
@@ -1868,9 +2305,22 @@ wait_for_http "$NPM_URL/api" "NPM API" 180 2 1 || die "NPM API did not become re
 
 if [ "$ACTION" = "install" ]; then
   log "Creating proxy hosts without TLS"
-  BASE_DOMAIN="$BASE_DOMAIN" NPM_ADMIN_EMAIL="$NPM_ADMIN_EMAIL" NPM_ADMIN_PASS="$NPM_ADMIN_PASS" \
-  TLS_MODE=none ENSURE_PROXY_HOSTS=1 \
-    bash utils/npm_ssl_bootstrap.sh
+  bootstrap_status=0
+  bootstrap_xtrace_was_enabled=0
+  case "$-" in
+    *x*) bootstrap_xtrace_was_enabled=1; set +x ;;
+  esac
+  if BASE_DOMAIN="$BASE_DOMAIN" NPM_ADMIN_EMAIL="$NPM_ADMIN_EMAIL" NPM_ADMIN_PASS="$NPM_ADMIN_PASS" \
+    TLS_MODE=none ENSURE_PROXY_HOSTS=1 \
+      bash utils/npm_ssl_bootstrap.sh; then
+    bootstrap_status=0
+  else
+    bootstrap_status=$?
+  fi
+  if (( bootstrap_xtrace_was_enabled )); then
+    set -x
+  fi
+  [ "$bootstrap_status" -eq 0 ] || exit "$bootstrap_status"
 
   cat <<EOF
 
