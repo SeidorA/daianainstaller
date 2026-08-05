@@ -39,7 +39,16 @@ record_update_verification_failure() {
 verify_update_services() {
   local max_tries="${DAIANA_POST_DEPLOY_MAX_TRIES:-60}"
   local delay="${DAIANA_POST_DEPLOY_RETRY_DELAY:-2}"
-  local service endpoint accept_redirect rollback_command
+  local service endpoint accept_redirect rollback_command checks
+
+  checks="Daiana Next|${SITE_URL%/}/|1
+Daiana Python|${BACKEND_BASE_URL%/}/api/v1/health|0"
+  if [ -n "${BUNDLE_MSTEAMS_IMAGE:-}" ]; then
+    checks+="
+Daiana Teams|${MS_BASE_URL%/}/health|0"
+  fi
+  checks+="
+Daiana Studio|${STUDIO_BASE_URL%/}/api/v1/ping|0"
 
   while IFS='|' read -r service endpoint accept_redirect; do
     log "Verifying $service readiness at $endpoint"
@@ -53,9 +62,5 @@ verify_update_services() {
       fi
       return 1
     fi
-  done <<EOF
-Daiana Next|${SITE_URL%/}/|1
-Daiana Python|${BACKEND_BASE_URL%/}/api/v1/health|0
-Daiana Studio|${STUDIO_BASE_URL%/}/api/v1/ping|0
-EOF
+  done <<< "$checks"
 }

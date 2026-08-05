@@ -20,6 +20,10 @@ BACKEND_BASE_URL="https://python.example.test"
 # shellcheck disable=SC2034
 STUDIO_BASE_URL="https://studio.example.test"
 # shellcheck disable=SC2034
+MS_BASE_URL="https://msteams.example.test"
+# shellcheck disable=SC2034
+BUNDLE_MSTEAMS_IMAGE="registry.example.com/msteams@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# shellcheck disable=SC2034
 DAIANA_POST_DEPLOY_MAX_TRIES=3
 # shellcheck disable=SC2034
 DAIANA_POST_DEPLOY_RETRY_DELAY=0
@@ -39,11 +43,19 @@ printf '%s\n' '{"id":"20260726-181500","type":"image-orchestration-rollback"}' >
 LAST_UPDATE_SNAPSHOT_DIR="$snapshot"
 
 verify_update_services || fail "healthy services were rejected"
-[[ "$(printf '%b' "$WAIT_CALLS" | wc -l | tr -d ' ')" -eq 3 ]] || fail "not all three services were checked"
+[[ "$(printf '%b' "$WAIT_CALLS" | wc -l | tr -d ' ')" -eq 4 ]] || fail "not all four services were checked"
 [[ "$WAIT_CALLS" == *"https://next.example.test/|Daiana Next readiness|3|0|1|0"* ]] || fail "Next readiness endpoint or retry bound is wrong"
 [[ "$WAIT_CALLS" == *"https://python.example.test/api/v1/health|Daiana Python readiness|3|0|0|0"* ]] || fail "Python health endpoint is wrong"
+[[ "$WAIT_CALLS" == *"https://msteams.example.test/health|Daiana Teams readiness|3|0|0|0"* ]] || fail "Teams health endpoint is wrong"
 [[ "$WAIT_CALLS" == *"https://studio.example.test/api/v1/ping|Daiana Studio readiness|3|0|0|0"* ]] || fail "Studio ping endpoint is wrong"
-pass "post-deployment verification requires Next, Python, and Studio readiness"
+pass "post-deployment verification requires Next, Python, Teams, and Studio readiness"
+
+WAIT_CALLS=""
+BUNDLE_MSTEAMS_IMAGE=""
+verify_update_services || fail "legacy three-service readiness was rejected"
+[[ "$(printf '%b' "$WAIT_CALLS" | wc -l | tr -d ' ')" -eq 3 ]] || fail "legacy bundle unexpectedly added Teams readiness"
+pass "legacy three-image updates retain three-service readiness compatibility"
+BUNDLE_MSTEAMS_IMAGE="registry.example.com/msteams@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 WAIT_CALLS=""
 LOG_OUTPUT=""

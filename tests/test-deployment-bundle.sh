@@ -15,9 +15,11 @@ source "$ROOT_DIR/utils/deployment-bundle.sh"
 digest_a="sha256:$(printf 'a%.0s' {1..64})"
 digest_b="sha256:$(printf 'b%.0s' {1..64})"
 digest_c="sha256:$(printf 'c%.0s' {1..64})"
+digest_d="sha256:$(printf 'd%.0s' {1..64})"
 commit_a="$(printf '1%.0s' {1..40})"
 commit_b="$(printf '2%.0s' {1..40})"
 commit_c="$(printf '3%.0s' {1..40})"
+commit_d="$(printf '4%.0s' {1..40})"
 
 for reference in 'repo/app:v1' "registry.example.com:5000/team/app@$digest_a" "repo/app:v1@$digest_a"; do
   validate_oci_reference "$reference" || fail "valid OCI reference rejected: $reference"
@@ -30,7 +32,7 @@ done
 pass "OCI validation is single-line and digest-aware"
 
 bundle="$TMP_DIR/bundle.json"
-jq -n \
+  jq -n \
   --arg next "registry.example.com/next:v1@$digest_a" \
   --arg python "registry.example.com/python@$digest_b" \
   --arg studio "registry.example.com/studio:v2@$digest_c" \
@@ -54,6 +56,28 @@ write_deployment_bundle_override "$override"
 [[ "$(jq -r '.services.daianastudio.image' "$override")" = "registry.example.com/studio:v2@$digest_c" ]] || fail "captured Studio ref changed"
 [[ "$(jq '.services | length' "$override")" -eq 3 ]] || fail "override is not exactly three services"
 pass "bundle is read once and emits one complete JSON override"
+
+qa_bundle="$TMP_DIR/qa-bundle.json"
+jq -n \
+  --arg next "registry.example.com/next@$digest_a" \
+  --arg python "registry.example.com/python@$digest_b" \
+  --arg msteams "registry.example.com/msteams@$digest_c" \
+  --arg studio "registry.example.com/studio@$digest_d" \
+  --arg da "$digest_a" --arg db "$digest_b" --arg dc "$digest_c" --arg dd "$digest_d" \
+  --arg ca "$commit_a" --arg cb "$commit_b" --arg cc "$commit_c" --arg cd "$commit_d" \
+  '{schema_version:2,deployment_mode:"complete-stack-replacement",images:{
+    next:{reference:$next,index_digest:$da,source_commit:$ca},
+    python:{reference:$python,index_digest:$db,source_commit:$cb},
+    msteams:{reference:$msteams,index_digest:$dc,source_commit:$cc},
+    studio:{reference:$studio,index_digest:$dd,source_commit:$cd}}}' > "$qa_bundle"
+load_deployment_bundle "$ROOT_DIR/releases/qa-candidate.example.json" || fail "checked-in QA bundle example rejected"
+[[ "$BUNDLE_MSTEAMS_IMAGE" == cloudseidoranalytics/daianamsteams@sha256:* ]] || fail "checked-in QA example omitted Teams"
+load_deployment_bundle "$qa_bundle" || fail "valid four-image QA bundle rejected"
+[[ "$BUNDLE_MSTEAMS_IMAGE" = "registry.example.com/msteams@$digest_c" ]] || fail "Teams reference was not captured"
+write_deployment_bundle_override "$override"
+[[ "$(jq '.services | length' "$override")" -eq 4 ]] || fail "QA override is not exactly four services"
+[[ "$(jq -r '.services.daianamsteams.image' "$override")" = "registry.example.com/msteams@$digest_c" ]] || fail "Teams reference changed"
+pass "four-image QA bundle includes digest-bound Teams provenance"
 
 assert_checked_in_bundle() {
   local name="$1" file="$2" expected_hash="$3"
@@ -107,6 +131,18 @@ for filter in \
   if validate_deployment_bundle "$document"; then fail "invalid or partial bundle accepted: $filter"; fi
 done
 pass "partial, mutable, mismatched, and non-strict bundles fail closed"
+
+for filter in \
+  'del(.images.msteams)' \
+  '.images.msteams.source_commit = "1234"' \
+  '.images.msteams.index_digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' \
+  '.images.msteams.reference = "registry.example.com/msteams:v1"' \
+  '.images.extra = .images.msteams'; do
+  jq "$filter" <<<"$(<"$qa_bundle")" > "$invalid"
+  document="$(<"$invalid")"
+  if validate_deployment_bundle "$document"; then fail "invalid four-image bundle accepted: $filter"; fi
+done
+pass "missing or invalid Teams image data fails closed"
 if grep -Eq 'BUNDLE_SCOPE|rollout_order' "$ROOT_DIR/utils/deployment-bundle.sh" "$ROOT_DIR/install-daiana.sh" "$ROOT_DIR/docs/update.md"; then
   fail "obsolete partial scope or rollout contract remains"
 fi
@@ -129,8 +165,14 @@ prepull_deployment_bundle_images && PORTAINER_CALLED=1 || true
 PULL_FAIL_IMAGE=""
 PULL_LOG=""
 prepull_deployment_bundle_images || fail "complete pre-pull failed"
-[[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 3 ]] || fail "not all three images were pulled"
-pass "all three pulls are required before the Portainer boundary"
+[[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 3 ]] || fail "backward-compatible bundle did not pull three images"
+pass "historical three-image bundles retain their pull behavior"
+load_deployment_bundle "$qa_bundle" || fail "QA bundle could not be reloaded"
+write_deployment_bundle_override "$override"
+PULL_LOG=""
+prepull_deployment_bundle_images || fail "complete QA pre-pull failed"
+[[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 4 ]] || fail "not all four images were pulled"
+pass "all four QA pulls are required before the Portainer boundary"
 pull_line="$(grep -n '  prepull_deployment_bundle_images$' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 start_line="$(grep -n 'Complete deployment bundle replacement start' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 submit_line="$(grep -n 'portainer_upsert_stack_from_vars .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
@@ -159,7 +201,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   docker compose --env-file "$ROOT_DIR/.env.example" -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/docker-compose.app.yml" -f "$override" \
     config --no-interpolate > "$final_stack"
   images="$(docker compose --env-file "$ROOT_DIR/.env.example" -f "$final_stack" config --images)"
-  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
+  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_MSTEAMS_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
     grep -Fxq "$reference" <<<"$images" || fail "final stack omitted exact ref: $reference"
   done
   awk '/^portainer_temp_cleanup\(\)/,/^ensure_network\(\)/ { if ($0 !~ /^ensure_network\(\)/) print }' \
@@ -179,7 +221,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   CAPTURED_PAYLOAD="$(<"$CAPTURE_FILE")"
   jq -jr '.StackFileContent' <<<"$CAPTURED_PAYLOAD" > "$TMP_DIR/submitted-stack.yml"
   cmp -s "$final_stack" "$TMP_DIR/submitted-stack.yml" || fail "Portainer payload changed stack bytes"
-  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
+  for reference in "$BUNDLE_NEXT_IMAGE" "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_MSTEAMS_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
     grep -Fq "$reference" "$TMP_DIR/submitted-stack.yml" || fail "Portainer payload omitted exact ref"
   done
   cp "$final_stack" "$TMP_DIR/docker-compose.before.yml"

@@ -11,9 +11,9 @@ DAIANA_DEPLOYMENT_BUNDLE="$PWD/releases/v2.2.0.json" \
 bash update-daiana.sh
 ```
 
-This is an opt-in, complete replacement of `daiananext`, `daianapython`, and `daianastudio` using digest-bound images. The application bundle version `v2.2.0` is independent from the Installer version in `VERSION` (`0.2.0`). Selecting the bundle does not rewrite source Compose files or retag the Installer.
+This is an opt-in, backward-compatible three-image complete replacement of `daiananext`, `daianapython`, and `daianastudio` using digest-bound images. The application bundle version `v2.2.0` is independent from the Installer version in `VERSION` (`0.2.0`). Selecting the bundle does not rewrite source Compose files or retag the Installer.
 
-The update remains migration-first: it saves an exact stack and Portainer Env snapshot, applies pending forward-only database migrations, pre-pulls all three images, and only then submits one application stack replacement. A pull or validation failure stops before Portainer mutation. After submission, bounded readiness checks must pass for Next, Python, and Studio before the installer reports success. A failed check records recovery details in the snapshot metadata and prints the exact rollback command; rollback is not automatic because it cannot reverse migrations or persisted data.
+The update remains migration-first: it saves an exact stack and Portainer Env snapshot, applies pending forward-only database migrations, pre-pulls all selected images, and only then submits one application stack replacement. A pull or validation failure stops before Portainer mutation. After submission, bounded readiness checks must pass for Next, Python, Teams, and Studio when a four-image QA bundle is selected; historical three-image bundles retain their three-service verification behavior. A failed check records recovery details in the snapshot metadata and prints the exact rollback command; rollback is not automatic because it cannot reverse migrations or persisted data.
 
 > **Rollback boundary:** Installer rollback restores the saved Compose stack and Portainer Env. It does not reverse database migrations or any persisted data. Review the snapshot before updating and keep the PostgreSQL backup until the application is verified.
 
@@ -98,7 +98,7 @@ DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/daiana-bundle.json \
 bash update-daiana.sh
 ```
 
-The version 1 contract contains `schema_version: 1`, `deployment_mode: "complete-stack-replacement"`, and exactly three image records under `images`: `next`, `python`, and `studio`. Every image record must contain:
+The compatibility contract accepts version 1 bundles with exactly three image records under `images`: `next`, `python`, and `studio`. The remote-QA contract uses version 2 with exactly four records: `next`, `python`, `msteams`, and `studio`. Both use `deployment_mode: "complete-stack-replacement"`. Every image record must contain:
 
 | Field | Contract |
 |---|---|
@@ -108,7 +108,18 @@ The version 1 contract contains `schema_version: 1`, `deployment_mode: "complete
 
 The bundle is read once, then the same captured bytes are validated, hashed, and converted to a literal JSON Compose override. Missing or extra records, mutable-only references, invalid provenance, digest mismatches, and unknown schema versions fail closed. There is no tag fallback or partial application.
 
-After all existing preconditions complete, the installer applies pending database migrations first and then pre-pulls all three images. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all three literal references; it does not perform or claim a sequential per-service rollout.
+After all existing preconditions complete, the installer applies pending database migrations first and then pre-pulls every image in the selected bundle. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all literal references; it does not perform or claim a sequential per-service rollout.
+
+## Remote-QA four-image candidate
+
+Run the manual `sha-candidate-image.yml` workflow in Front, Python, Teams, and Studio with the exact source SHA from each repository's `develop`. Retain each workflow's digest-authoritative reference, then create a copy of `releases/qa-candidate.example.json` and replace its four example references, digests, and source commits with those outputs. The example intentionally contains non-published zero digests and must never be deployed unchanged.
+
+```bash
+DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/qa-candidate.json \
+bash update-daiana.sh
+```
+
+The QA bundle must contain all four services, including `daianamsteams`; tags are not deployment identity. The four workflows publish only stable `sha-<source SHA>` candidate tags, never `latest` or release tags, and their summaries expose the index digest needed for this bundle.
 
 Before update, the installer requires the exact current Portainer stack content and Env array, stores the Env in a protected snapshot file, and records its SHA-256 in metadata. Rollback submits both saved values directly, so placeholders are not re-resolved from current environment values or repository defaults. Rollback still does not reverse migrations or persisted data.
 
