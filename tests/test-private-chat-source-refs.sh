@@ -58,8 +58,8 @@ approved_legacy_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_R
 env "${approved_legacy_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "older approved Teams tuple rejected"
 pass "older approved Teams tuple remains accepted"
 
-real_python_sha="$(git -C "$ROOT_DIR/../daianapython" rev-parse c2694d4^{commit})"
-real_msteams_sha="$(git -C "$ROOT_DIR/../daianamsteams" rev-parse f546bb0^{commit})"
+real_python_sha="$(git -C "$ROOT_DIR/../daianapython" rev-parse 'c2694d4^{commit}')"
+real_msteams_sha="$(git -C "$ROOT_DIR/../daianamsteams" rev-parse 'f546bb0^{commit}')"
 [[ "$real_python_sha" == c2694d4a7ac766da8c730a7e4cb6b82759a9332a ]] || fail "Python internal-auth commit SHA changed"
 [[ "$real_msteams_sha" == f546bb0ff6272f11a892f5107ef0b1c4462f5b89 ]] || fail "Teams internal-auth commit SHA changed"
 approved_msteams_new="cloudseidoranalytics/daianamsteams:sha-$real_msteams_sha"

@@ -26,8 +26,6 @@ make_source_repo "$TMP_DIR/msteams"
 make_source_repo "$TMP_DIR/studio"
 next_image='cloudseidoranalytics/daiana:sha-503d3c65bce2d9ec68d714010f680f702052c3dc'
 python_image='cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8'
-msteams_image="cloudseidoranalytics/daianamsteams:sha-$(git -C "$TMP_DIR/msteams" rev-parse develop)"
-studio_image="cloudseidoranalytics/daianastudio:sha-$(git -C "$TMP_DIR/studio" rev-parse develop)"
 python_origin='http://api.192.168.0.19.nip.io'
 teams_internal_auth_secret='fixture-teams-secret'
 export TEAMS_INTERNAL_AUTH_SECRET="$teams_internal_auth_secret"
