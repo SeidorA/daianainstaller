@@ -1055,6 +1055,33 @@ prepare_update_app_compose_files() {
   log "Using independently versioned images: webui=$webui_version studio=$studio_version qdrant=$qdrant_version"
 }
 
+preserve_bundle_services_from_snapshot() {
+  [ "${BUNDLE_ACTIVE:-0}" = "1" ] || return 0
+  [ "${BUNDLE_SCHEMA_VERSION:-}" = "2" ] || return 0
+
+  local snapshot_compose preserved_override service image
+  local -a preserved_services=(daianavanna daianawhatsapp daianawebui daianaqdrant)
+  local -a override_args=()
+  snapshot_compose="$LAST_UPDATE_SNAPSHOT_DIR/docker-compose.before.yml"
+  [ -s "$snapshot_compose" ] || die "Cannot preserve bundle services: missing exact update snapshot compose"
+
+  for service in "${preserved_services[@]}"; do
+    image="$(compose_service_image "$snapshot_compose" "$service")"
+    [ -n "$image" ] || {
+      die "Cannot preserve bundle service $service: no image reference in exact update snapshot"
+      # shellcheck disable=SC2317
+      return 1
+    }
+    override_args+=("$service" "$image")
+  done
+
+  preserved_override="$(mktemp)" || die "Could not create bundle preservation compose override"
+  write_update_compose_override "$preserved_override" "${override_args[@]}"
+  BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE="$preserved_override"
+  APP_DEPLOY_COMPOSE_FILES+=("$preserved_override")
+  log "Preserving omitted bundle services from exact update snapshot"
+}
+
 list_update_snapshots() {
   local history_dir="${UPDATE_HISTORY_DIR:-./volumes/daiana/update-history}"
   [ -d "$history_dir" ] || return 0
@@ -1919,10 +1946,19 @@ SUPABASE_COMPOSE_FILES=(docker-compose.yml)
 APP_COMPOSE_FILES=(docker-compose.yml docker-compose.app.yml)
 APP_DEPLOY_COMPOSE_FILES=("${APP_COMPOSE_FILES[@]}")
 UPDATE_COMPOSE_OVERRIDE_FILE=""
+BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE=""
 UPDATE_HISTORY_DIR="${UPDATE_HISTORY_DIR:-./volumes/daiana/update-history}"
 ROLLBACK_SNAPSHOT_DIR=""
 ROLLBACK_STACK_ENV_JSON=""
 LAST_UPDATE_SNAPSHOT_DIR=""
+
+cleanup_update_compose_overrides() {
+  local file
+  for file in "$UPDATE_COMPOSE_OVERRIDE_FILE" "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE"; do
+    [ -n "$file" ] && rm -f -- "$file"
+  done
+}
+trap cleanup_update_compose_overrides EXIT
 
 SUPABASE_CORE_CONTAINERS=(
   supabase-studio
@@ -2258,6 +2294,7 @@ EOF
   fi
   CURRENT_PHASE="saving update rollback snapshot"
   save_update_snapshot
+  preserve_bundle_services_from_snapshot
 else
   CURRENT_PHASE="bootstrapping Portainer"
   ensure_network

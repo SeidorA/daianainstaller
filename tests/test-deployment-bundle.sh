@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1091
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,6 +9,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; return 1; }
+log() { :; }
 
 # shellcheck source=utils/deployment-bundle.sh
 source "$ROOT_DIR/utils/deployment-bundle.sh"
@@ -169,10 +171,106 @@ prepull_deployment_bundle_images || fail "complete pre-pull failed"
 pass "historical three-image bundles retain their pull behavior"
 load_deployment_bundle "$qa_bundle" || fail "QA bundle could not be reloaded"
 write_deployment_bundle_override "$override"
+qa_override="$TMP_DIR/qa.override"
+cp "$override" "$qa_override"
 PULL_LOG=""
 prepull_deployment_bundle_images || fail "complete QA pre-pull failed"
 [[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 4 ]] || fail "not all four images were pulled"
 pass "all four QA pulls are required before the Portainer boundary"
+
+# shellcheck source=/dev/null
+compose_service_image() {
+  local compose_file="$1" service_name="$2"
+  awk -v service="$service_name" '
+    $0 ~ "^  " service ":$" { in_service=1; next }
+    in_service && $0 ~ /^  [A-Za-z0-9_-]+:$/ { in_service=0 }
+    in_service && $1 == "image:" { print $2; exit }
+  ' "$compose_file"
+}
+write_update_compose_override() {
+  local output_file="$1"
+  shift
+  {
+    printf 'services:\n'
+    while [ "$#" -gt 0 ]; do
+      printf '  %s:\n    image: %s\n' "$1" "$2"
+      shift 2
+    done
+  } > "$output_file"
+}
+die() { printf 'ERROR: %s\n' "$*" >&2; return 1; }
+# shellcheck source=/dev/null
+awk '/^preserve_bundle_services_from_snapshot\(\)/,/^list_update_snapshots\(\)/ { if ($0 !~ /^list_update_snapshots\(\)/) print }' \
+  "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/preserve-bundle-services.sh"
+source "$TMP_DIR/preserve-bundle-services.sh"
+snapshot_dir="$TMP_DIR/snapshot"
+mkdir "$snapshot_dir"
+cat > "$snapshot_dir/docker-compose.before.yml" <<'EOF'
+services:
+  daiananext:
+    image: candidate/next@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  daianapython:
+    image: candidate/python@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  daianamsteams:
+    image: candidate/msteams@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  daianastudio:
+    image: candidate/studio@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  daianavanna:
+    image: cloudseidoranalytics/daianavanna:v2.2.0
+  daianawhatsapp:
+    image: cloudseidoranalytics/daianawhatsapp:v2.2.0
+  daianawebui:
+    image: cloudseidoranalytics/daianawebui:v2.2.0
+  daianaqdrant:
+    image: qdrant/qdrant:v1.14.1
+EOF
+BUNDLE_ACTIVE=1 BUNDLE_SCHEMA_VERSION=2 LAST_UPDATE_SNAPSHOT_DIR="$snapshot_dir" \
+  APP_DEPLOY_COMPOSE_FILES=(base.json "$qa_override") preserve_bundle_services_from_snapshot
+preserved_image="$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daianavanna)"
+[[ "$preserved_image" = cloudseidoranalytics/daianavanna:v2.2.0 ]] || fail "Vanna image was not preserved"
+[[ "$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daianawhatsapp)" = cloudseidoranalytics/daianawhatsapp:v2.2.0 ]] || fail "WhatsApp image was not preserved"
+[[ "$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daiananext)" = "" ]] || fail "candidate service was overwritten by preservation override"
+[[ "$(jq -r '.services.daiananext.image' "$qa_override")" = "registry.example.com/next@$digest_a" ]] || fail "candidate override lost digest-bound image"
+pass "schema-v2 bundles preserve omitted services without replacing digest-bound candidates"
+
+rm -f "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE"
+missing_snapshot_dir="$TMP_DIR/missing-snapshot"
+mkdir "$missing_snapshot_dir"
+awk '/^  daianaqdrant:$/,/^  [A-Za-z0-9_-]+:$/ { next } { print }' \
+  "$snapshot_dir/docker-compose.before.yml" > "$missing_snapshot_dir/docker-compose.before.yml"
+# shellcheck disable=SC2034
+BUNDLE_ACTIVE=1 BUNDLE_SCHEMA_VERSION=2 LAST_UPDATE_SNAPSHOT_DIR="$missing_snapshot_dir" APP_DEPLOY_COMPOSE_FILES=()
+if preserve_bundle_services_from_snapshot; then
+  fail "missing preserved service image was accepted"
+fi
+pass "missing preserved service image fails closed"
+
+APP_DEPLOY_COMPOSE_FILES=(base.json)
+# shellcheck disable=SC2034
+BUNDLE_ACTIVE=1
+# shellcheck disable=SC2034
+BUNDLE_SCHEMA_VERSION=1
+# shellcheck disable=SC2034
+LAST_UPDATE_SNAPSHOT_DIR="$snapshot_dir"
+preserve_bundle_services_from_snapshot
+[[ "${#APP_DEPLOY_COMPOSE_FILES[@]}" -eq 1 ]] || fail "schema-v1 behavior changed"
+pass "schema-v1 bundle behavior remains unchanged"
+
+# shellcheck source=/dev/null
+awk '/^cleanup_update_compose_overrides\(\)/,/^SUPABASE_CORE_CONTAINERS=\(/ { if ($0 !~ /^SUPABASE_CORE_CONTAINERS=\(/) print }' \
+  "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/cleanup-update-overrides.sh"
+source "$TMP_DIR/cleanup-update-overrides.sh"
+cleanup_one="$TMP_DIR/update.override"
+cleanup_two="$TMP_DIR/preserved.override"
+: > "$cleanup_one"
+: > "$cleanup_two"
+# shellcheck disable=SC2034
+UPDATE_COMPOSE_OVERRIDE_FILE="$cleanup_one"
+BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE="$cleanup_two"
+cleanup_update_compose_overrides
+[[ ! -e "$cleanup_one" && ! -e "$cleanup_two" ]] || fail "update override cleanup left temporary files"
+pass "update compose overrides are cleaned up"
+
 pull_line="$(grep -n '  prepull_deployment_bundle_images$' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 start_line="$(grep -n 'Complete deployment bundle replacement start' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
 submit_line="$(grep -n 'portainer_upsert_stack_from_vars .*APP_DEPLOY_COMPOSE_FILES' "$ROOT_DIR/install-daiana.sh" | cut -d: -f1)"
