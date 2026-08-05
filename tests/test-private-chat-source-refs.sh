@@ -53,10 +53,20 @@ local_guard=(ALLOW_LOCAL_FEATURE_REFS=1 "${local_guard[@]}")
 env "${approved_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "approved refs with opt-in rejected"
 pass "exact approved full SHAs pass only with local opt-in and guards"
 
-approved_msteams_new='cloudseidoranalytics/daianamsteams:sha-28174f50391b6fa83d7cf97382a756f5d2f5fcb1'
-approved_new_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams_new" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=28174f50391b6fa83d7cf97382a756f5d2f5fcb1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
+approved_msteams_legacy='cloudseidoranalytics/daianamsteams:sha-28174f50391b6fa83d7cf97382a756f5d2f5fcb1'
+approved_legacy_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams_legacy" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=28174f50391b6fa83d7cf97382a756f5d2f5fcb1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
+env "${approved_legacy_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "older approved Teams tuple rejected"
+pass "older approved Teams tuple remains accepted"
+
+real_python_sha="$(git -C "$ROOT_DIR/../daianapython" rev-parse c2694d4^{commit})"
+real_msteams_sha="$(git -C "$ROOT_DIR/../daianamsteams" rev-parse f546bb0^{commit})"
+[[ "$real_python_sha" == c2694d4a7ac766da8c730a7e4cb6b82759a9332a ]] || fail "Python internal-auth commit SHA changed"
+[[ "$real_msteams_sha" == f546bb0ff6272f11a892f5107ef0b1c4462f5b89 ]] || fail "Teams internal-auth commit SHA changed"
+approved_msteams_new="cloudseidoranalytics/daianamsteams:sha-$real_msteams_sha"
+approved_python_new="cloudseidoranalytics/daianapython:sha-$real_python_sha"
+approved_new_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python_new" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams_new" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA="$real_python_sha" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA="$real_msteams_sha" DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
 env "${approved_new_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "new approved Teams tuple rejected"
-pass "new Teams tuple passes only with exact approved full SHAs and local guards"
+pass "internal-auth Python/Teams tuple passes with exact sibling-repository SHAs and local guards"
 
 expect_reject() {
   if env "$@" bash "$harness" validate-source-refs >/dev/null 2>&1; then fail "invalid source-ref case was accepted"; fi

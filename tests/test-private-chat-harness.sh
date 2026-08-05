@@ -29,6 +29,8 @@ python_image='cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc25
 msteams_image="cloudseidoranalytics/daianamsteams:sha-$(git -C "$TMP_DIR/msteams" rev-parse develop)"
 studio_image="cloudseidoranalytics/daianastudio:sha-$(git -C "$TMP_DIR/studio" rev-parse develop)"
 python_origin='http://api.192.168.0.19.nip.io'
+teams_internal_auth_secret='fixture-teams-secret'
+export TEAMS_INTERNAL_AUTH_SECRET="$teams_internal_auth_secret"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
@@ -151,13 +153,14 @@ case "${1:-}" in
           printf 'NODE_ENV=development\n'
           [[ "${FAKE_SCENARIO:-}" == env_duplicate_conflict ]] && printf 'NODE_ENV=production\n' || printf 'NODE_ENV=development\n'
            printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
-            elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
-              [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n' || printf 'UNRELATED_SETTING=baseline\n';
-            elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
-             elif [[ "$container" == daiana-next || "$container" == daiana-python ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\n'; [[ "$container" == daiana-next ]] && printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"; printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+             elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
+               [[ "$container" == daiana-msteams ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}";
+               [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n' || printf 'UNRELATED_SETTING=baseline\n';
+             elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+              elif [[ "$container" == daiana-next || "$container" == daiana-python ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\n'; [[ "$container" == daiana-next ]] && printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
             else printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'; fi
         else
-           if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
+           if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then [[ "$container" == daiana-msteams ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
            elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python ]]; then
             if [[ "$container" == daiana-next ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; else printf 'UNRELATED_SETTING=baseline\n'; fi
           elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then
@@ -170,24 +173,25 @@ case "${1:-}" in
            printf 'NODE_ENV=production\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=false\n'
          elif [[ "${FAKE_SCENARIO:-}" == baseline_env_mutation && -e "${FAKE_STATE}.env-mutated" ]]; then
            printf 'NODE_ENV=production\nUNRELATED_SETTING=mutated\n'
-           elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
-          else printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; fi
+            elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"
+           else printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; fi
        fi
      elif [[ "${4:-}" == *Config.Env* ]]; then
          if [[ "$state" == candidate || "$state" == partial ]]; then
               if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
-                [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf '["UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"]\n' || printf '["UNRELATED_SETTING=baseline"]\n';
-               elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
+                 [[ "$container" == daiana-msteams ]] && printf '["TEAMS_INTERNAL_AUTH_SECRET=%s",' "${TEAMS_INTERNAL_AUTH_SECRET}" || printf '[';
+                 [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf '"UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"]\n' || printf '"UNRELATED_SETTING=baseline"]\n';
+                elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ',"PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
                 elif [[ "$container" == daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_PYTHON_ORIGIN=%s","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
-                elif [[ "$container" == daiana-python ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
+                 elif [[ "$container" == daiana-python ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","TEAMS_INTERNAL_AUTH_SECRET=%s","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n' "${TEAMS_INTERNAL_AUTH_SECRET}"
              else printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'; fi
-         elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then printf '["UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
+          elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then [[ "$container" == daiana-msteams ]] && printf '["TEAMS_INTERNAL_AUTH_SECRET=%s",' "${TEAMS_INTERNAL_AUTH_SECRET}" || printf '['; printf '"UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
          elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python && "$container" == daiana-python ]]; then printf '["UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_malformed ]]; then printf '["NODE_ENV","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_mutation && -e "${FAKE_STATE}.env-mutated" ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=mutated"]\n'
-         elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
-        else printf '["NODE_ENV=production","UNRELATED_SETTING=baseline"]\n'; fi
+          elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ']\n'
+         else printf '["NODE_ENV=production","UNRELATED_SETTING=baseline"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ']\n'; fi
       elif [[ "${4:-}" == *'{{.Image}}'* ]]; then
         if [[ "$state" == candidate || "$state" == partial ]]; then
           if [[ "$container" == daiana-next ]]; then
@@ -248,10 +252,11 @@ next_image = os.environ["DAIANA_CANDIDATE_NEXT_IMAGE"]
 python_image = os.environ["DAIANA_CANDIDATE_PYTHON_IMAGE"]
 msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
 studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
+teams_secret = os.environ.get("TEAMS_INTERNAL_AUTH_SECRET", "fixture-teams-secret")
 services = {
     "daiananext": {"command": None, "entrypoint": None, "image": next_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_PYTHON_ORIGIN": os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"], "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
-    "daianapython": {"command": None, "entrypoint": None, "image": python_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
-    "daianamsteams": {"command": None, "entrypoint": None, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
+    "daianapython": {"command": None, "entrypoint": None, "image": python_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true", "TEAMS_INTERNAL_AUTH_SECRET": teams_secret}, "networks": {"default": None}},
+    "daianamsteams": {"command": None, "entrypoint": None, "image": msteams_image, "pull_policy": "never", "environment": {"TEAMS_INTERNAL_AUTH_SECRET": teams_secret}, "networks": {"default": None}},
     "daianastudio": {"command": None, "entrypoint": None, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
 }
 mutation = scenario.removeprefix("overlay_")
@@ -302,6 +307,7 @@ msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
 studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
 env_next = {"UNRELATED_SETTING": "baseline"}
 env_python = dict(env_next)
+env_python["TEAMS_INTERNAL_AUTH_SECRET"] = os.environ["TEAMS_INTERNAL_AUTH_SECRET"]
 if os.environ.get("COMPOSE_CANDIDATE_RENDERED") == "yes":
     env_next.update({"NODE_ENV": "development", "PRIVATE_CHAT_PYTHON_ORIGIN": os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"], "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"})
     env_python.update({"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"})
@@ -317,7 +323,7 @@ model = {
     "daianavanna": {"command": None, "entrypoint": None, "image": "cloudseidoranalytics/daianavanna:v2.1.9", "networks": {"default": None}},
     "daiananext": {"command": None, "entrypoint": None, "environment": env_next, "image": next_image, "pull_policy": "never", "networks": {"default": None}},
      "daianapython": {"command": None, "entrypoint": None, "environment": env_python, "image": python_image, "pull_policy": "never", "networks": {"default": None}},
-     "daianamsteams": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline"}, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
+      "daianamsteams": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline", "TEAMS_INTERNAL_AUTH_SECRET": os.environ["TEAMS_INTERNAL_AUTH_SECRET"]}, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
      "daianastudio": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline"}, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
     },
 }
@@ -378,7 +384,7 @@ run_case() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-$scenario"
   : > "$TMP_DIR/docker-$scenario.log"
   export FAKE_SCENARIO="$scenario" FAKE_STATE="$TMP_DIR/docker-state-$scenario" DOCKER_LOG="$TMP_DIR/docker-$scenario.log"
-    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
+   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin" TEAMS_INTERNAL_AUTH_SECRET="$teams_internal_auth_secret"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
     export DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"

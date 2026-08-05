@@ -54,12 +54,12 @@ if "Python and Teams use their local `develop` refs, while Studio uses its fixed
 if "Daiana quota changes" not in text:
     raise SystemExit("documentation does not explain the Studio baseline rationale")
 expected_refs = (
-    "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
-    "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-28174f50391b6fa83d7cf97382a756f5d2f5fcb1",
+    "DAIANA_CANDIDATE_PYTHON_IMAGE=cloudseidoranalytics/daianapython:sha-c2694d4a7ac766da8c730a7e4cb6b82759a9332a",
+    "DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-f546bb0ff6272f11a892f5107ef0b1c4462f5b89",
     "DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69",
     "DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc",
-    "DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8",
-    "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=28174f50391b6fa83d7cf97382a756f5d2f5fcb1",
+    "DAIANA_APPROVED_PYTHON_SOURCE_SHA=c2694d4a7ac766da8c730a7e4cb6b82759a9332a",
+    "DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=f546bb0ff6272f11a892f5107ef0b1c4462f5b89",
     "DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69",
 )
 missing_refs = [ref for ref in expected_refs if ref not in harness_blocks[0]]
@@ -67,5 +67,7 @@ if missing_refs:
     raise SystemExit("preflight does not document exact four-service source refs: %s" % ", ".join(missing_refs))
 if "1571fc1e7e7f11038168dd1a6673cdd50777efa1" not in text:
     raise SystemExit("documentation does not preserve the previously approved Teams tuple")
+if "28174f50391b6fa83d7cf97382a756f5d2f5fcb1" not in text or "older approved" not in normalized_text:
+    raise SystemExit("documentation does not preserve all older approved Teams tuples")
 print("PASS: documented harness commands parse and carry every mandatory local guard")
 PY

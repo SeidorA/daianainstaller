@@ -27,6 +27,7 @@ APPROVED_STUDIO_IMAGE_REPOSITORY="cloudseidoranalytics/daianastudio"
 APPROVED_SOURCE_TUPLES=(
   '503d3c65bce2d9ec68d714010f680f702052c3dc|68565fb1870da340a6f5f3f6bc258f7bf3d70ab8|1571fc1e7e7f11038168dd1a6673cdd50777efa1|ed872073e7f359e7b8c88c6c2a26f55c46582c69'
   '503d3c65bce2d9ec68d714010f680f702052c3dc|68565fb1870da340a6f5f3f6bc258f7bf3d70ab8|28174f50391b6fa83d7cf97382a756f5d2f5fcb1|ed872073e7f359e7b8c88c6c2a26f55c46582c69'
+  '503d3c65bce2d9ec68d714010f680f702052c3dc|c2694d4a7ac766da8c730a7e4cb6b82759a9332a|f546bb0ff6272f11a892f5107ef0b1c4462f5b89|ed872073e7f359e7b8c88c6c2a26f55c46582c69'
 )
 MIGRATION_120000="20260731120000_add_flowise_quota_finalization.sql"
 MIGRATION_130000="20260727130000_add_history_message_refs.sql"
@@ -388,7 +389,7 @@ require_candidate_environment_set() {
      [[ -n "$key" ]] || continue
      case ",$baseline_keys," in *",$key,"*) ;; *)
        case "$key" in
-         NODE_ENV|PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN) ;;
+          NODE_ENV|PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN|TEAMS_INTERNAL_AUTH_SECRET) ;;
          PRIVATE_CHAT_PYTHON_ORIGIN) [[ "$container" == "$NEXT_CONTAINER" ]] || return 1 ;;
          *) return 1 ;;
        esac
@@ -408,6 +409,7 @@ require_candidate_environment_contract() {
   done
   candidate_only=""
   if service_is_development_candidate "$service"; then candidate_only='NODE_ENV PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN'; fi
+  if [[ "$service" == daianapython || "$service" == daianamsteams ]]; then candidate_only="$candidate_only TEAMS_INTERNAL_AUTH_SECRET"; fi
   [[ "$service" == daiananext ]] && candidate_only="$candidate_only PRIVATE_CHAT_PYTHON_ORIGIN"
   candidate_contract="$(env_contract "$container")" || return 1
   image_contract="$(image_environment_contract "$candidate_image")" || return 1
@@ -418,8 +420,10 @@ require_candidate_environment_contract() {
       elif [[ "$key" == PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN && "$candidate_only" == *PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN* ]]; then
          [[ "$actual_hash" == "$(printf '%s' true | text_sha256)" ]] || return 1
       elif [[ "$key" == PRIVATE_CHAT_PYTHON_ORIGIN && "$candidate_only" == *PRIVATE_CHAT_PYTHON_ORIGIN* ]]; then
-        [[ -n "${PRIVATE_CHAT_PYTHON_ORIGIN:-}" && "$actual_hash" == "$(printf '%s' "$PRIVATE_CHAT_PYTHON_ORIGIN" | text_sha256)" ]] || return 1
-     else
+         [[ -n "${PRIVATE_CHAT_PYTHON_ORIGIN:-}" && "$actual_hash" == "$(printf '%s' "$PRIVATE_CHAT_PYTHON_ORIGIN" | text_sha256)" ]] || return 1
+      elif [[ "$key" == TEAMS_INTERNAL_AUTH_SECRET && "$candidate_only" == *TEAMS_INTERNAL_AUTH_SECRET* ]]; then
+         [[ -n "${TEAMS_INTERNAL_AUTH_SECRET:-}" && "$actual_hash" == "$(printf '%s' "$TEAMS_INTERNAL_AUTH_SECRET" | text_sha256)" ]] || return 1
+      else
       expected_hash="$(printf '%s\n' "$baseline_contract" | awk -F '|' -v key="$key" '$1 == key { print $2; exit }')"
       if [[ -n "$expected_hash" ]]; then
         [[ "$actual_hash" == "$expected_hash" ]] || return 1
@@ -550,6 +554,9 @@ require_candidate_configuration() {
   if [[ "$service" == daiananext ]]; then
     require_exact_env_entry "$container" "PRIVATE_CHAT_PYTHON_ORIGIN=${PRIVATE_CHAT_PYTHON_ORIGIN:?}" || die "candidate container $container is missing the exact private-chat Python origin"
   fi
+  if [[ "$service" == daianapython || "$service" == daianamsteams ]]; then
+    [[ -n "${TEAMS_INTERNAL_AUTH_SECRET:-}" ]] || return 1
+  fi
 }
 
 require_paths() {
@@ -590,9 +597,10 @@ validate_candidate_compose_contract() {
     EXPECTED_NEXT_IMAGE="$DAIANA_CANDIDATE_NEXT_IMAGE" \
      EXPECTED_PYTHON_IMAGE="$DAIANA_CANDIDATE_PYTHON_IMAGE" \
      EXPECTED_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
-     EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
-     EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN="${PRIVATE_CHAT_PYTHON_ORIGIN:?}" \
-     python3 -c 'import json, os, re, sys
+      EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
+      EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN="${PRIVATE_CHAT_PYTHON_ORIGIN:?}" \
+      TEAMS_INTERNAL_AUTH_SECRET="${TEAMS_INTERNAL_AUTH_SECRET:?}" \
+      python3 -c 'import json, os, re, sys
 
 def valid_origin(value):
     from ipaddress import ip_address
@@ -651,6 +659,8 @@ try:
         if service["image"] != image or not re.fullmatch(re.escape(repository) + r":sha-[0-9a-f]{40}", service["image"]):
             raise ValueError("overlay image mismatch")
         expected_environment = {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"} if name in ("daiananext", "daianapython") else {}
+        if name in ("daianapython", "daianamsteams"):
+            expected_environment["TEAMS_INTERNAL_AUTH_SECRET"] = os.environ["TEAMS_INTERNAL_AUTH_SECRET"]
         if name == "daiananext":
             origin = os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"]
             if not valid_origin(origin):
@@ -686,6 +696,7 @@ except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
     EXPECTED_MSTEAMS_IMAGE="$DAIANA_CANDIDATE_MSTEAMS_IMAGE" \
     EXPECTED_STUDIO_IMAGE="$DAIANA_CANDIDATE_STUDIO_IMAGE" \
     EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN="${PRIVATE_CHAT_PYTHON_ORIGIN:?}" \
+    TEAMS_INTERNAL_AUTH_SECRET="${TEAMS_INTERNAL_AUTH_SECRET:?}" \
     NEXT_BASELINE_CONTRACT="$next_contract" \
     PYTHON_BASELINE_CONTRACT="$python_contract" \
     MSTEAMS_BASELINE_CONTRACT="$msteams_contract" \
@@ -763,6 +774,8 @@ try:
                 raise ValueError("invalid baseline contract")
             baseline[key] = digest
         candidate_only = {"NODE_ENV", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN"} if name in ("daiananext", "daianapython") else set()
+        if name in ("daianapython", "daianamsteams"):
+            candidate_only.add("TEAMS_INTERNAL_AUTH_SECRET")
         if name == "daiananext":
             candidate_only.add("PRIVATE_CHAT_PYTHON_ORIGIN")
         if set(environment) - (set(baseline) | candidate_only):
@@ -777,12 +790,16 @@ try:
                     raise ValueError("origin guard mismatch")
                 if key == "PRIVATE_CHAT_PYTHON_ORIGIN" and (value != os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"] or not valid_origin(value)):
                     raise ValueError("private-chat Python origin mismatch")
+                if key == "TEAMS_INTERNAL_AUTH_SECRET" and value != os.environ["TEAMS_INTERNAL_AUTH_SECRET"]:
+                    raise ValueError("Teams internal auth secret mismatch")
             elif hashlib.sha256(value.encode()).hexdigest() != baseline[key]:
                 raise ValueError("baseline environment mismatch")
         for key in baseline:
             if key not in environment:
                 raise ValueError("missing explicit baseline environment key")
         required = {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"} if name in ("daiananext", "daianapython") else {}
+        if name in ("daianapython", "daianamsteams"):
+            required["TEAMS_INTERNAL_AUTH_SECRET"] = os.environ["TEAMS_INTERNAL_AUTH_SECRET"]
         if name == "daiananext":
             required["PRIVATE_CHAT_PYTHON_ORIGIN"] = os.environ["EXPECTED_PRIVATE_CHAT_PYTHON_ORIGIN"]
         if any(environment.get(key) != value for key, value in required.items()):
@@ -1527,6 +1544,8 @@ activate() {
   BASELINE_PYTHON_NODE_ENV_STATE="$(receipt_value baseline_python_node_env_state "$STATE_DIR/baseline.receipt")"
   BASELINE_NEXT_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_next_protected_config_keys "$STATE_DIR/baseline.receipt")"
   BASELINE_PYTHON_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_python_protected_config_keys "$STATE_DIR/baseline.receipt")"
+  BASELINE_MSTEAMS_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_msteams_protected_config_keys "$STATE_DIR/baseline.receipt")"
+  BASELINE_STUDIO_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_studio_protected_config_keys "$STATE_DIR/baseline.receipt")"
   BASELINE_NEXT_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_next_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
   BASELINE_PYTHON_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_python_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
   BASELINE_MSTEAMS_FINGERPRINT="$(receipt_value msteams_safe_config_sha256 "$STATE_DIR/baseline.receipt")"
@@ -1583,6 +1602,8 @@ cleanup() {
   if [[ ! -e "$STATE_DIR/active" ]]; then cleanup_failure "no active candidate harness state; retained receipts require manual inspection"; return 1; fi
   if [[ "${DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION:-}" != yes ]]; then cleanup_failure "cleanup requires explicit runtime mutation consent; retry is blocked"; return 1; fi
   if [[ ! -f "$STATE_DIR/baseline.receipt" || ! -f "$STATE_DIR/active.receipt" ]]; then cleanup_failure "required active receipts are missing; diagnostics retained"; return 1; fi
+  BASELINE_MSTEAMS_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_msteams_protected_config_keys "$STATE_DIR/baseline.receipt")"
+  BASELINE_STUDIO_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_studio_protected_config_keys "$STATE_DIR/baseline.receipt")"
   if ! verify_receipts_redacted; then cleanup_failure "cleanup receipt redaction verification failed; receipts retained and retry is blocked"; return 1; fi
    DAIANA_CANDIDATE_NEXT_IMAGE="$(receipt_value candidate_next_image "$STATE_DIR/active.receipt")"
    DAIANA_CANDIDATE_PYTHON_IMAGE="$(receipt_value candidate_python_image "$STATE_DIR/active.receipt")"
@@ -1612,15 +1633,15 @@ cleanup() {
    BASELINE_PYTHON_ENV_KEYS="$(receipt_value baseline_python_env_keys "$STATE_DIR/baseline.receipt")"
    BASELINE_MSTEAMS_ENV_KEYS="$(receipt_value baseline_msteams_env_keys "$STATE_DIR/baseline.receipt")"
    BASELINE_STUDIO_ENV_KEYS="$(receipt_value baseline_studio_env_keys "$STATE_DIR/baseline.receipt")"
-   BASELINE_MSTEAMS_NODE_ENV_STATE="$(receipt_value baseline_msteams_node_env_state "$STATE_DIR/baseline.receipt")"
-   BASELINE_STUDIO_NODE_ENV_STATE="$(receipt_value baseline_studio_node_env_state "$STATE_DIR/baseline.receipt")"
-  BASELINE_NEXT_NODE_ENV_STATE="$(receipt_value baseline_next_node_env_state "$STATE_DIR/baseline.receipt")"
-  BASELINE_PYTHON_NODE_ENV_STATE="$(receipt_value baseline_python_node_env_state "$STATE_DIR/baseline.receipt")"
-  BASELINE_NEXT_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_next_protected_config_keys "$STATE_DIR/baseline.receipt")"
-  BASELINE_PYTHON_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_python_protected_config_keys "$STATE_DIR/baseline.receipt")"
-  BASELINE_NEXT_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_next_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
-  BASELINE_PYTHON_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_python_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
-   BASELINE_MSTEAMS_FINGERPRINT="$(receipt_value msteams_safe_config_sha256 "$STATE_DIR/baseline.receipt")"
+    BASELINE_MSTEAMS_NODE_ENV_STATE="$(receipt_value baseline_msteams_node_env_state "$STATE_DIR/baseline.receipt")"
+    BASELINE_STUDIO_NODE_ENV_STATE="$(receipt_value baseline_studio_node_env_state "$STATE_DIR/baseline.receipt")"
+   BASELINE_NEXT_NODE_ENV_STATE="$(receipt_value baseline_next_node_env_state "$STATE_DIR/baseline.receipt")"
+   BASELINE_PYTHON_NODE_ENV_STATE="$(receipt_value baseline_python_node_env_state "$STATE_DIR/baseline.receipt")"
+    BASELINE_NEXT_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_next_protected_config_keys "$STATE_DIR/baseline.receipt")"
+    BASELINE_PYTHON_PROTECTED_CONFIG_KEYS="$(receipt_value baseline_python_protected_config_keys "$STATE_DIR/baseline.receipt")"
+    BASELINE_NEXT_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_next_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
+    BASELINE_PYTHON_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_python_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
+     BASELINE_MSTEAMS_FINGERPRINT="$(receipt_value msteams_safe_config_sha256 "$STATE_DIR/baseline.receipt")"
    BASELINE_STUDIO_FINGERPRINT="$(receipt_value studio_safe_config_sha256 "$STATE_DIR/baseline.receipt")"
    BASELINE_MSTEAMS_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_msteams_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
    BASELINE_STUDIO_PROTECTED_CONFIG_SHA256="$(receipt_value baseline_studio_protected_config_sha256 "$STATE_DIR/baseline.receipt")"
