@@ -40,7 +40,7 @@ See [docs/README.md](docs/README.md) for the full lifecycle guide.
 | Nginx Proxy Manager | Public DNS/proxy host creation and certificate workflow |
 | Updates | Selectable Daiana image versions, optional independently versioned images, and rollback snapshots |
 | Database migrations | Forward-only ordered Daiana migrations with advisory locking and checksum history |
-| Local candidate harness | Registry-free authenticated private-chat candidate activation for arm64 |
+| Candidate validation | Remote-QA candidates are published by manual GitHub Actions workflows and consumed by digest-bound four-image bundles; the local harness remains arm64-only tooling |
 | Versioning | `VERSION`, `CHANGELOG.md`, `versions.md`, and Git tags |
 
 Each Portainer stack receives only the environment variables referenced by its compose file(s).
