@@ -36,7 +36,7 @@ grep -q 'value_file' "$ROOT_DIR/apply-certs.sh"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-awk '/^docker_login_private_registry\(\)/,/^}/ { print } /^prepull_daiana_images\(\)/,/^\)/ { print }' \
+awk '/^portainer_isolate_child_traps\(\)/,/^}/ { print } /^docker_login_private_registry\(\)/,/^}/ { print } /^prepull_daiana_images\(\)/,/^\)/ { print }' \
   "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/prepull-functions.sh"
 cat > "$TMP_DIR/prepull-xtrace.sh" <<'EOF'
 #!/usr/bin/env bash

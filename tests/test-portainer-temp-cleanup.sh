@@ -380,6 +380,53 @@ for auth_mode in success failure; do
 done
 pass "nested auth-style requests isolate traps, clean files, and preserve status"
 
+nested_stack_script="$TMP_DIR/nested-stack.sh"
+cat > "$nested_stack_script" <<'EOF'
+set -euo pipefail
+source "$1"
+mode="$2"
+trap_log="$3"
+PORTAINER_URL=http://portainer.test
+PORTAINER_ENDPOINT_ID=1
+ENV='[]'
+REG='[]'
+export PORTAINER_URL PORTAINER_ENDPOINT_ID ENV REG
+trap 'builtin printf caller-exit >> "$trap_log"' EXIT
+render_compose() { builtin printf 'services:\n  app:\n    image: fixture\n' > "$1"; }
+portainer_stack_id() { builtin printf '7'; }
+curl() {
+  if [ "$mode" = success ]; then
+    builtin printf '{"ok":true}\n200\n'
+  else
+    builtin printf '{"password":"fixture-stack-secret"}\n500\n'
+  fi
+}
+before_exit="$(trap -p EXIT)"
+if portainer_upsert_stack_from_vars app ENV REG docker-compose.yml; then
+  result=0
+else
+  result=$?
+fi
+[ "$(trap -p EXIT)" = "$before_exit" ]
+if [ "$mode" = success ]; then
+  [ "$result" -eq 0 ]
+else
+  [ "$result" -ne 0 ]
+fi
+EOF
+for stack_mode in success failure; do
+  nested_marker="$TMP_DIR/nested-stack-$stack_mode.trap"
+  if ! (TMPDIR="$TMP_DIR/mktemp" bash "$nested_stack_script" "$TMP_DIR/portainer-functions.sh" \
+    "$stack_mode" "$nested_marker") >"$TMP_DIR/nested-stack-$stack_mode.out" 2>"$TMP_DIR/nested-stack-$stack_mode.err"; then
+    fail "nested stack upsert $stack_mode request failed"
+  fi
+  [ "$(<"$nested_marker")" = caller-exit ] || fail "nested stack upsert $stack_mode request recursed into caller trap"
+  ! grep -q 'fixture-stack-secret' "$TMP_DIR/nested-stack-$stack_mode.out" \
+    "$TMP_DIR/nested-stack-$stack_mode.err" || fail "nested stack upsert $stack_mode diagnostics leaked response data"
+  assert_temp_dir_empty
+done
+pass "nested stack upserts isolate traps, clean files, redact diagnostics, and preserve status"
+
 printf '%s' '{"not":"an Env array"' > "$env_file"
 if portainer_submit_stack_file daiana-app "$env_file" "$registry_file" "$stack_file" \
   >"$TMP_DIR/parse.out" 2>"$TMP_DIR/parse.err"; then
