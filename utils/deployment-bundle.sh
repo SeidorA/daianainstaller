@@ -61,13 +61,16 @@ validate_deployment_bundle() {
 }
 
 load_deployment_bundle() {
-  local file="$1"
+  local file="$1" schema_version
   [ -f "$file" ] || { die "Deployment bundle not found: $file"; return 1; }
   BUNDLE_DOCUMENT="$(<"$file")"
   validate_deployment_bundle "$BUNDLE_DOCUMENT" || return 1
   # Consumed by the sourcing installer as the immutable selection marker.
   # shellcheck disable=SC2034
   BUNDLE_ACTIVE=1
+  schema_version="$(jq -r '.schema_version' <<<"$BUNDLE_DOCUMENT")"
+  # shellcheck disable=SC2034 # consumed by the sourcing installer
+  BUNDLE_SCHEMA_VERSION="$schema_version"
   IFS=$'\t' read -r BUNDLE_NEXT_IMAGE BUNDLE_PYTHON_IMAGE BUNDLE_MSTEAMS_IMAGE BUNDLE_STUDIO_IMAGE < <(
     jq -r 'if .schema_version == 2
       then [.images.next.reference, .images.python.reference, .images.msteams.reference, .images.studio.reference]
