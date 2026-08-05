@@ -1435,6 +1435,7 @@ portainer_request_form() {
 }
 
 portainer_admin_init() (
+  portainer_isolate_child_traps
   local response status body payload user_file pass_file xtrace_was_enabled=0 request_status=0
   case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
@@ -1464,6 +1465,7 @@ portainer_admin_init() (
 )
 
 portainer_token() (
+  portainer_isolate_child_traps
   local saved_token token xtrace_was_enabled=0 payload user_file pass_file token_status=0
   case "$-" in *x*) xtrace_was_enabled=1; set +x ;; esac
   local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
@@ -1621,6 +1623,7 @@ portainer_ensure_private_registry() {
 
 docker_login_private_registry() {
   (
+  portainer_isolate_child_traps
   case "$-" in *x*) set +x ;; esac
   local registry_user="${1:-${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}}"
   local registry_pat="${2:-${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}}"
@@ -1633,6 +1636,7 @@ docker_login_private_registry() {
 }
 
 prepull_daiana_images() (
+  portainer_isolate_child_traps
   # Use a subshell so the caller's xtrace state is restored even when a mock
   # or command below returns early.  Disable xtrace before expanding any
   # credential-bearing argument or default.
@@ -1690,6 +1694,7 @@ portainer_stack_id() {
 }
 
 portainer_upsert_stack() (
+  portainer_isolate_child_traps
   case "$-" in *x*) set +x ;; esac
   local stack_name="$1"
   local stack_env_file="$2"
@@ -1705,6 +1710,7 @@ portainer_upsert_stack() (
 )
 
 portainer_upsert_stack_from_vars() (
+  portainer_isolate_child_traps
   case "$-" in *x*) set +x ;; esac
   local stack_name="$1" env_var="$2" registry_var="$3"
   shift 3
@@ -1720,6 +1726,7 @@ portainer_upsert_stack_from_vars() (
 )
 
 portainer_submit_stack_file() (
+  portainer_isolate_child_traps
   case "$-" in *x*) set +x ;; esac
   local stack_name="$1"
   local stack_env_file="$2"
@@ -1755,6 +1762,7 @@ portainer_submit_stack_file() (
 )
 
 portainer_rollback_stack() (
+  portainer_isolate_child_traps
   case "$-" in *x*) set +x ;; esac
   local stack_name="$1" env_var="$2" registry_var="$3" stack_file="$4"
   local env_file registry_file stack_temp_file
