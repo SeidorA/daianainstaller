@@ -66,6 +66,7 @@ SQL
 
   migration_dir="$work_dir/migrations"
   mkdir -p "$migration_dir"
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260731120000_add_flowise_quota_finalization.sql" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260727130000_add_history_message_refs.sql" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260727140000_allow_authorized_private_message_quota.sql" "$migration_dir/"
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container" DAIANA_MIGRATIONS_DIR="$migration_dir"
@@ -76,8 +77,10 @@ SQL
     SELECT to_regclass('public.figure_artifacts') IS NOT NULL;
     SELECT has_table_privilege('service_role', 'public.figure_artifacts', 'SELECT');
     SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
-    SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');")"
-  [ "$(printf '%s\n' "$checks" | grep -c '^t$')" -eq 5 ] \
+     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+     SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE');
+     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE');")"
+  [ "$(printf '%s\n' "$checks" | grep -c '^t$')" -eq 7 ] \
     || die "PostgreSQL $pg_version feature migration checks failed: $checks"
   printf 'PASS: PostgreSQL %s feature migrations applied, skipped idempotently, and hardened privileges\n' "$pg_version"
   cleanup

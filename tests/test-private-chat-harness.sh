@@ -8,10 +8,27 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 harness="$ROOT_DIR/utils/private-chat-harness.sh"
 override="$ROOT_DIR/docker-compose.private-chat-candidate.yml"
+flowise_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260731120000_add_flowise_quota_finalization.sql"
 next_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727130000_add_history_message_refs.sql"
 quota_migration="$ROOT_DIR/volumes/db/daiana-migrations/20260727140000_allow_authorized_private_message_quota.sql"
-next_image='cloudseidoranalytics/daiana:sha-90bd701c3eec30f7d3b56fb230050f7e46fd98bf'
-python_image='cloudseidoranalytics/daianapython:sha-16e161f468f1976d15ba40b1312dc5f247d64dab'
+make_source_repo() {
+  local repo="$1"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.invalid
+  git -C "$repo" config user.name harness-test
+  : > "$repo/source"
+  git -C "$repo" add source
+  git -C "$repo" commit -q -m initial
+  git -C "$repo" branch -M develop
+}
+make_source_repo "$TMP_DIR/msteams"
+make_source_repo "$TMP_DIR/studio"
+next_image='cloudseidoranalytics/daiana:sha-503d3c65bce2d9ec68d714010f680f702052c3dc'
+python_image='cloudseidoranalytics/daianapython:sha-68565fb1870da340a6f5f3f6bc258f7bf3d70ab8'
+python_origin='http://api.192.168.0.19.nip.io'
+teams_internal_auth_secret='fixture-teams-secret'
+export TEAMS_INTERNAL_AUTH_SECRET="$teams_internal_auth_secret"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 pass() { printf 'PASS: %s\n' "$*"; }
@@ -35,6 +52,9 @@ grep -q 'require_exact_env_entry' "$harness" || fail "candidate environment asse
 grep -q 'compose_environment_contract' "$harness" || fail "baseline Compose-explicit environment contract is missing"
 grep -q 'image_environment_contract' "$harness" || fail "candidate image-default environment contract is missing"
 grep -q 'candidate_next_image_id' "$harness" || fail "candidate image ID binding is missing"
+for service_ref in DAIANA_CANDIDATE_MSTEAMS_IMAGE DAIANA_CANDIDATE_STUDIO_IMAGE candidate_msteams_image_id candidate_studio_image_id msteams_candidate_config_sha256 studio_candidate_config_sha256; do
+  grep -q "$service_ref" "$harness" || fail "four-service receipt/config contract is missing: $service_ref"
+done
 pass "harness has staged receipts, compensation boundary, exact env checks, and image proof"
 
 grep -q 'pull_policy: never' "$override" || fail "candidate override permits image pulling"
@@ -44,8 +64,12 @@ grep -q 'name: daiana-mgmt' "$override" || fail "candidate changed the required 
 grep -q 'external: true' "$override" || fail "candidate network is not external"
 pass "candidate Compose override remains local-only"
 
-for migration in "$next_migration" "$quota_migration"; do
-  grep -q 'Provenance: daianapython commit 16e161f468f1976d15ba40b1312dc5f247d64dab' "$migration" || fail "migration provenance is missing"
+for migration in "$flowise_migration" "$next_migration" "$quota_migration"; do
+  if [[ "$migration" == "$flowise_migration" ]]; then
+    grep -q 'Provenance: daianapython commit 68565fb1870da340a6f5f3f6bc258f7bf3d70ab8' "$migration" || fail "Flowise migration provenance is missing"
+  else
+    grep -q 'Provenance: daianapython commit 16e161f468f1976d15ba40b1312dc5f247d64dab' "$migration" || fail "migration provenance is missing"
+  fi
   grep -q 'Canonical source SHA-256:' "$migration" || fail "migration source checksum is missing"
 done
 
@@ -69,18 +93,28 @@ case "${1:-}" in
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 9
          elif [[ "${5:-}" == 'cloudseidoranalytics/daiana:v2.1.9' ]]; then
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 1
-         elif [[ "${5:-}" == 'cloudseidoranalytics/daianapython:v2.1.9' ]]; then
-           printf 'cloudseidoranalytics/daianapython@sha256:%064d\n' 2
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianapython:v2.1.9' ]]; then
+            printf 'cloudseidoranalytics/daianapython@sha256:%064d\n' 2
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianamsteams:v2.1.9' ]]; then
+            printf 'cloudseidoranalytics/daianamsteams@sha256:%064d\n' 5
+          elif [[ "${5:-}" == 'cloudseidoranalytics/daianastudio:v3.1.3' ]]; then
+            printf 'cloudseidoranalytics/daianastudio@sha256:%064d\n' 6
          else
            printf 'cloudseidoranalytics/daiana@sha256:%064d\n' 3
          fi
        elif [[ "${FAKE_SCENARIO:-}" == runtime_digest_mismatch ]]; then
         if [[ "${5:-}" == *daiana-next* || "${5:-}" == *daiananext* ]]; then printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 9 9
+        elif [[ "${5:-}" == 'cloudseidoranalytics/daianamsteams:v2.1.9' ]]; then printf 'sha256:%064d|cloudseidoranalytics/daianamsteams@sha256:%064d|arm64\n' 5 5
+        elif [[ "${5:-}" == 'cloudseidoranalytics/daianastudio:v3.1.3' ]]; then printf 'sha256:%064d|cloudseidoranalytics/daianastudio@sha256:%064d|arm64\n' 6 6
         else printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 2 2; fi
        elif [[ "${5:-}" == *'cloudseidoranalytics/daiana:sha-'* ]]; then
          [[ "${FAKE_SCENARIO:-}" == candidate_image_id_mismatch ]] && printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 9 9 || printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 3 3
-       elif [[ "${5:-}" == *'cloudseidoranalytics/daianapython:sha-'* ]]; then
-         printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 4 4
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianapython:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 4 4
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianamsteams:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianamsteams@sha256:%064d|arm64\n' 7 7
+        elif [[ "${5:-}" == *'cloudseidoranalytics/daianastudio:sha-'* ]]; then
+          printf 'sha256:%064d|cloudseidoranalytics/daianastudio@sha256:%064d|arm64\n' 8 8
        elif [[ "${5:-}" == 'cloudseidoranalytics/daiana:v2.1.9' ]]; then
           [[ "${FAKE_SCENARIO:-}" == baseline_image_digest_mutation && -e "$FAKE_STATE.restored" ]] && printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 1 9 || printf 'sha256:%064d|cloudseidoranalytics/daiana@sha256:%064d|arm64\n' 1 1
        else printf 'sha256:%064d|cloudseidoranalytics/daianapython@sha256:%064d|arm64\n' 2 2; fi
@@ -101,23 +135,31 @@ case "${1:-}" in
          if [[ "${FAKE_SCENARIO:-}" == post_start || "${FAKE_SCENARIO:-}" == compensation_failure ]]; then printf 'local/wrong:sha-0000000000000000000000000000000000000000\n'
          elif [[ "${FAKE_SCENARIO:-}" == tag_retarget ]]; then printf 'cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
          else printf '%s\n' "${DAIANA_CANDIDATE_NEXT_IMAGE:?}"; fi
-      elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-python ]]; then printf '%s\n' "${DAIANA_CANDIDATE_PYTHON_IMAGE:?}"
-      elif [[ "$container" == daiana-next ]]; then printf 'cloudseidoranalytics/daiana:v2.1.9\n'
-      else printf 'cloudseidoranalytics/daianapython:v2.1.9\n'; fi
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-python ]]; then printf '%s\n' "${DAIANA_CANDIDATE_PYTHON_IMAGE:?}"
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-msteams ]]; then printf '%s\n' "${DAIANA_CANDIDATE_MSTEAMS_IMAGE:?}"
+       elif [[ "$state" == candidate || "$state" == partial ]] && [[ "$container" == daiana-studio ]]; then printf '%s\n' "${DAIANA_CANDIDATE_STUDIO_IMAGE:?}"
+       elif [[ "$container" == daiana-next ]]; then printf 'cloudseidoranalytics/daiana:v2.1.9\n'
+       elif [[ "$container" == daiana-python ]]; then printf 'cloudseidoranalytics/daianapython:v2.1.9\n'
+       elif [[ "$container" == daiana-msteams ]]; then printf 'cloudseidoranalytics/daianamsteams:v2.1.9\n'
+       else printf 'cloudseidoranalytics/daianastudio:v3.1.3\n'; fi
     elif [[ "${4:-}" == *State.Status* ]]; then printf 'running\n'
     elif [[ "${4:-}" == *'range .Config.Env'* ]]; then
       if [[ "$state" == candidate || "$state" == partial ]]; then
-           if [[ "${FAKE_SCENARIO:-}" == runtime_explicit_baseline_mutation ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=mutated\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'
-         elif [[ "${FAKE_SCENARIO:-}" == env_mismatch ]]; then printf 'NODE_ENV=development-extra\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'
+            if [[ "${FAKE_SCENARIO:-}" == runtime_explicit_baseline_mutation ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=mutated\nPRIVATE_CHAT_PYTHON_ORIGIN=%s\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
+          elif [[ "${FAKE_SCENARIO:-}" == env_mismatch ]]; then printf 'NODE_ENV=development-extra\nPRIVATE_CHAT_PYTHON_ORIGIN=%s\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
         elif [[ "${FAKE_SCENARIO:-}" == env_duplicate_same || "${FAKE_SCENARIO:-}" == env_duplicate_conflict ]]; then
           printf 'NODE_ENV=development\n'
           [[ "${FAKE_SCENARIO:-}" == env_duplicate_conflict ]] && printf 'NODE_ENV=production\n' || printf 'NODE_ENV=development\n'
-          printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'
-           elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
-           elif [[ "$container" == daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
-          else printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'; fi
-       else
-          if [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python ]]; then
+           printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
+             elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
+               [[ "$container" == daiana-msteams ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}";
+               [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n' || printf 'UNRELATED_SETTING=baseline\n';
+             elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=candidate-image\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+              elif [[ "$container" == daiana-next || "$container" == daiana-python ]]; then printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\n'; [[ "$container" == daiana-next ]] && printf 'PRIVATE_CHAT_PYTHON_ORIGIN=%s\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n';
+            else printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true\n'; fi
+        else
+           if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then [[ "$container" == daiana-msteams ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf 'UNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
+           elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python ]]; then
             if [[ "$container" == daiana-next ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; else printf 'UNRELATED_SETTING=baseline\n'; fi
           elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then
             printf 'NODE_ENV=development\nUNRELATED_SETTING=baseline\n'
@@ -129,30 +171,42 @@ case "${1:-}" in
            printf 'NODE_ENV=production\nPRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=false\n'
          elif [[ "${FAKE_SCENARIO:-}" == baseline_env_mutation && -e "${FAKE_STATE}.env-mutated" ]]; then
            printf 'NODE_ENV=production\nUNRELATED_SETTING=mutated\n'
-           elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'
-          else printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; fi
+            elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\nIMAGE_DEFAULT=baseline-image\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"
+           else printf 'NODE_ENV=production\nUNRELATED_SETTING=baseline\n'; [[ "$container" == daiana-python ]] && printf 'TEAMS_INTERNAL_AUTH_SECRET=%s\n' "${TEAMS_INTERNAL_AUTH_SECRET}"; fi
        fi
      elif [[ "${4:-}" == *Config.Env* ]]; then
          if [[ "$state" == candidate || "$state" == partial ]]; then
-             if [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
-             elif [[ "$container" == daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
-            else printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'; fi
-        elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python && "$container" == daiana-python ]]; then printf '["UNRELATED_SETTING=baseline"]\n'
+              if [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then
+                 [[ "$container" == daiana-msteams ]] && printf '["TEAMS_INTERNAL_AUTH_SECRET=%s",' "${TEAMS_INTERNAL_AUTH_SECRET}" || printf '[';
+                 [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]] && printf '"UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"]\n' || printf '"UNRELATED_SETTING=baseline"]\n';
+                elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted && "$container" != daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=candidate-image"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ',"PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'
+                elif [[ "$container" == daiana-next ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_PYTHON_ORIGIN=%s","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n' "${PRIVATE_CHAT_PYTHON_ORIGIN}"
+                 elif [[ "$container" == daiana-python ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","TEAMS_INTERNAL_AUTH_SECRET=%s","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n' "${TEAMS_INTERNAL_AUTH_SECRET}"
+             else printf '["NODE_ENV=development","UNRELATED_SETTING=baseline","PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN=true"]\n'; fi
+          elif [[ "$container" == daiana-msteams || "$container" == daiana-studio ]]; then [[ "$container" == daiana-msteams ]] && printf '["TEAMS_INTERNAL_AUTH_SECRET=%s",' "${TEAMS_INTERNAL_AUTH_SECRET}" || printf '['; printf '"UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
+         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_missing_python && "$container" == daiana-python ]]; then printf '["UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_wrong ]]; then printf '["NODE_ENV=development","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_malformed ]]; then printf '["NODE_ENV","UNRELATED_SETTING=baseline"]\n'
         elif [[ "${FAKE_SCENARIO:-}" == baseline_env_mutation && -e "${FAKE_STATE}.env-mutated" ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=mutated"]\n'
-         elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"]\n'
-        else printf '["NODE_ENV=production","UNRELATED_SETTING=baseline"]\n'; fi
+          elif [[ "${FAKE_SCENARIO:-}" == compose_image_default_env_omitted ]]; then printf '["NODE_ENV=production","UNRELATED_SETTING=baseline","IMAGE_DEFAULT=baseline-image"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ']\n'
+         else printf '["NODE_ENV=production","UNRELATED_SETTING=baseline"'; [[ "$container" == daiana-python ]] && printf ',"TEAMS_INTERNAL_AUTH_SECRET=%s"' "${TEAMS_INTERNAL_AUTH_SECRET}"; printf ']\n'; fi
       elif [[ "${4:-}" == *'{{.Image}}'* ]]; then
         if [[ "$state" == candidate || "$state" == partial ]]; then
           if [[ "$container" == daiana-next ]]; then
             [[ "${FAKE_SCENARIO:-}" == immutable_id_mismatch ]] && printf 'sha256:%064d\n' 9 || printf 'sha256:%064d\n' 3
-          else printf 'sha256:%064d\n' 4; fi
+           elif [[ "$container" == daiana-msteams ]]; then printf 'sha256:%064d\n' 7
+           elif [[ "$container" == daiana-studio ]]; then printf 'sha256:%064d\n' 8
+           else printf 'sha256:%064d\n' 4; fi
         elif [[ "$container" == daiana-next ]]; then
            [[ "${FAKE_SCENARIO:-}" == baseline_image_id_mutation && -e "$FAKE_STATE.restored" ]] && printf 'sha256:%064d\n' 9 || printf 'sha256:%064d\n' 1
-        else printf 'sha256:%064d\n' 2; fi
+         elif [[ "$container" == daiana-msteams ]]; then printf 'sha256:%064d\n' 5
+         elif [[ "$container" == daiana-studio ]]; then printf 'sha256:%064d\n' 6
+         else printf 'sha256:%064d\n' 2; fi
      elif [[ "${4:-}" == *'{{.Id}}'* ]]; then printf '%s-%s-id\n' "$state" "$container"
-    elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
+     elif [[ "${4:-}" == *Config.Labels* ]]; then printf '{}\n'
+     elif [[ "${4:-}" == *Mounts* ]]; then printf '[]\n'
+     elif [[ "${4:-}" == *HostConfig.NetworkMode* ]]; then printf 'default\n'
+     elif [[ "${4:-}" == *'{{.Config.Image}}|'* ]]; then printf '%064d\n' 0
     else printf 'container-id\n'; fi
     exit ;;
   exec)
@@ -179,9 +233,9 @@ case "${1:-}" in
         done
         [[ -e "${FAKE_STATE}.migration-stop" ]] || exit 124
      fi
-     if [[ "$*" == *'count(*) = 2'* ]]; then
-      printf 't\n20260727130000|add_history_message_refs|%s\n20260727140000|allow_authorized_private_message_quota|%s\n' "$(shasum -a 256 "$DAIANA_TEST_NEXT_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_QUOTA_MIGRATION" | cut -d ' ' -f 1)"
-    elif [[ "$*" == *to_regclass* ]]; then printf 't\nt\nt\n'
+      if [[ "$*" == *'count(*) = 3'* ]]; then
+       printf 't\n20260727130000|add_history_message_refs|%s\n20260727140000|allow_authorized_private_message_quota|%s\n20260731120000|add_flowise_quota_finalization|%s\n' "$(shasum -a 256 "$DAIANA_TEST_NEXT_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_QUOTA_MIGRATION" | cut -d ' ' -f 1)" "$(shasum -a 256 "$DAIANA_TEST_FLOWISE_MIGRATION" | cut -d ' ' -f 1)"
+     elif [[ "$*" == *to_regclass* ]]; then printf 't\nt\nt\nt\n'
      else while IFS= read -r _; do :; done; fi
      exit ;;
    compose)
@@ -194,9 +248,14 @@ import json, os
 scenario = os.environ.get("FAKE_SCENARIO", "")
 next_image = os.environ["DAIANA_CANDIDATE_NEXT_IMAGE"]
 python_image = os.environ["DAIANA_CANDIDATE_PYTHON_IMAGE"]
+msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
+studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
+teams_secret = os.environ.get("TEAMS_INTERNAL_AUTH_SECRET", "fixture-teams-secret")
 services = {
-    "daiananext": {"command": None, "entrypoint": None, "image": next_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
-    "daianapython": {"command": None, "entrypoint": None, "image": python_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
+    "daiananext": {"command": None, "entrypoint": None, "image": next_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_PYTHON_ORIGIN": os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"], "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"}, "networks": {"default": None}},
+    "daianapython": {"command": None, "entrypoint": None, "image": python_image, "pull_policy": "never", "environment": {"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true", "TEAMS_INTERNAL_AUTH_SECRET": teams_secret}, "networks": {"default": None}},
+    "daianamsteams": {"command": None, "entrypoint": None, "image": msteams_image, "pull_policy": "never", "environment": {"TEAMS_INTERNAL_AUTH_SECRET": teams_secret}, "networks": {"default": None}},
+    "daianastudio": {"command": None, "entrypoint": None, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
 }
 mutation = scenario.removeprefix("overlay_")
 if mutation == "ports": services["daiananext"]["ports"] = ["8080:8080"]
@@ -211,6 +270,17 @@ elif mutation == "extra_network": services["unrelated"] = {"name": "unrelated", 
 elif mutation == "wrong_network": network_name = "wrong-network"
 elif mutation == "wrong_image": services["daiananext"]["image"] = "cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 elif mutation == "wrong_pull_policy": services["daianapython"]["pull_policy"] = "always"
+elif mutation == "origin_public_http": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://example.com"
+elif mutation == "origin_public_nip_http": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.8.8.8.8.nip.io"
+elif mutation == "origin_path": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://127.0.0.1:5002/path"
+elif mutation == "origin_query": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19.nip.io?x=1"
+elif mutation == "origin_fragment": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19.nip.io#fragment"
+elif mutation == "origin_credentials": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://user@api.192.168.0.19.nip.io"
+elif mutation == "origin_whitespace": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api.192.168.0.19 .nip.io"
+elif mutation == "origin_malformed_host": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://api..192.168.0.19.nip.io"
+elif mutation == "origin_wrong_service_placement": services["daiananext"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = "http://192.168.0.19.api.nip.io"
+elif mutation == "origin_python_service":
+    services["daianapython"]["environment"]["PRIVATE_CHAT_PYTHON_ORIGIN"] = os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"]
 elif mutation in {"malicious_yaml_tag", "invalid_yaml"}: services["daiananext"]["invalid"] = True
 else: network_name = "daiana-mgmt"
 network_name = locals().get("network_name", "daiana-mgmt")
@@ -231,11 +301,14 @@ import json, os
 scenario = os.environ.get("FAKE_SCENARIO", "")
 next_image = os.environ["DAIANA_CANDIDATE_NEXT_IMAGE"]
 python_image = os.environ["DAIANA_CANDIDATE_PYTHON_IMAGE"]
+msteams_image = os.environ["DAIANA_CANDIDATE_MSTEAMS_IMAGE"]
+studio_image = os.environ["DAIANA_CANDIDATE_STUDIO_IMAGE"]
 env_next = {"UNRELATED_SETTING": "baseline"}
 env_python = dict(env_next)
+env_python["TEAMS_INTERNAL_AUTH_SECRET"] = os.environ["TEAMS_INTERNAL_AUTH_SECRET"]
 if os.environ.get("COMPOSE_CANDIDATE_RENDERED") == "yes":
-    env_next.update({"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"})
-    env_python.update(env_next)
+    env_next.update({"NODE_ENV": "development", "PRIVATE_CHAT_PYTHON_ORIGIN": os.environ["PRIVATE_CHAT_PYTHON_ORIGIN"], "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"})
+    env_python.update({"NODE_ENV": "development", "PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN": "true"})
 if scenario == "compose_env_mismatch":
     env_python["NODE_ENV"] = "production"
 if scenario == "compose_baseline_value_mutation" and os.environ.get("COMPOSE_CANDIDATE_RENDERED") == "yes":
@@ -247,7 +320,9 @@ model = {
     "studio": {"command": None, "entrypoint": None, "image": "supabase/studio:fixture", "networks": {"default": None}},
     "daianavanna": {"command": None, "entrypoint": None, "image": "cloudseidoranalytics/daianavanna:v2.1.9", "networks": {"default": None}},
     "daiananext": {"command": None, "entrypoint": None, "environment": env_next, "image": next_image, "pull_policy": "never", "networks": {"default": None}},
-    "daianapython": {"command": None, "entrypoint": None, "environment": env_python, "image": python_image, "pull_policy": "never", "networks": {"default": None}},
+     "daianapython": {"command": None, "entrypoint": None, "environment": env_python, "image": python_image, "pull_policy": "never", "networks": {"default": None}},
+      "daianamsteams": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline", "TEAMS_INTERNAL_AUTH_SECRET": os.environ["TEAMS_INTERNAL_AUTH_SECRET"]}, "image": msteams_image, "pull_policy": "never", "networks": {"default": None}},
+     "daianastudio": {"command": None, "entrypoint": None, "environment": {"UNRELATED_SETTING": "baseline"}, "image": studio_image, "pull_policy": "never", "networks": {"default": None}},
     },
 }
 if scenario == "compose_image_mismatch":
@@ -307,10 +382,10 @@ run_case() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-$scenario"
   : > "$TMP_DIR/docker-$scenario.log"
   export FAKE_SCENARIO="$scenario" FAKE_STATE="$TMP_DIR/docker-state-$scenario" DOCKER_LOG="$TMP_DIR/docker-$scenario.log"
-   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image"
+   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin" TEAMS_INTERNAL_AUTH_SECRET="$teams_internal_auth_secret"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
-  export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
+    export DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
       unset DAIANA_HARNESS_TEST_FAIL_RECEIPT_WRITE DAIANA_HARNESS_TEST_FAIL_RECEIPT_VALIDATION DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_WRITE DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_VALIDATION DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_RENAME DAIANA_HARNESS_TEST_FAIL_MIGRATION_RECEIPT_FSYNC DAIANA_HARNESS_TEST_FAIL_MIGRATION_COMMITMENT_WRITE DAIANA_HARNESS_TEST_FAIL_POST_MIGRATION DAIANA_HARNESS_TEST_SIGNAL_AFTER_MIGRATION DAIANA_HARNESS_TEST_TAMPER_STAGED_RECEIPT DAIANA_HARNESS_TEST_TAMPER_BASELINE_FINGERPRINT
    [[ "$scenario" != receipt_write ]] || export DAIANA_HARNESS_TEST_FAIL_RECEIPT_WRITE=yes
    [[ "$scenario" != receipt_validation ]] || export DAIANA_HARNESS_TEST_FAIL_RECEIPT_VALIDATION=yes
@@ -404,23 +479,25 @@ run_success() {
   printf 'baseline\n' > "$TMP_DIR/docker-state-success"
   : > "$TMP_DIR/docker-success.log"
   : > "$TMP_DIR/durable-success.log"
-   export FAKE_SCENARIO="${SUCCESS_SCENARIO:-none}" FAKE_STATE="$TMP_DIR/docker-state-success" DOCKER_LOG="$TMP_DIR/docker-success.log"
-   export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image"
+    export FAKE_SCENARIO="${SUCCESS_SCENARIO:-none}" FAKE_STATE="$TMP_DIR/docker-state-success" DOCKER_LOG="$TMP_DIR/docker-success.log"
+    export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
    export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db
-  export DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
+   export DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration"
    export DAIANA_HARNESS_TEST_DURABLE_TRACE_FILE="$TMP_DIR/durable-success.log" DAIANA_COMPOSE_PROJECT_NAME=daiana-app
-     DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes PATH="$FAKE_BIN:$PATH" bash "$harness" activate >/dev/null 2>&1 || fail "successful activation failed"
+      DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes PATH="$FAKE_BIN:$PATH" bash "$harness" activate || fail "successful activation failed"
   [[ -e "$state_dir/active" && -s "$state_dir/active.receipt" ]] || fail "successful activation did not publish active receipt/marker"
    [[ -e "$state_dir/migrations-applied.receipt" ]] || fail "successful activation omitted migration receipt"
    grep -q '^compose_project=daiana-app$' "$state_dir/active.receipt" || fail "active receipt omitted fixed Compose project identity"
-   grep -q '^mutation_services=daianapython,daiananext$' "$state_dir/active.receipt" || fail "active receipt omitted mutation service scope"
+    grep -q '^mutation_services=daianapython,daiananext,daianamsteams,daianastudio$' "$state_dir/active.receipt" || fail "active receipt omitted mutation service scope"
   grep -q 'fsync-file-after-rename:' "$TMP_DIR/durable-success.log" || fail "successful activation omitted post-rename file fsync"
   grep -q 'fsync-directory-after-rename:' "$TMP_DIR/durable-success.log" || fail "successful activation omitted post-rename directory fsync"
   baseline_line="$(grep -n 'baseline.receipt' "$TMP_DIR/durable-success.log" | sed -n '1p' | cut -d: -f1)"
   active_line="$(grep -n 'active.receipt' "$TMP_DIR/durable-success.log" | sed -n '1p' | cut -d: -f1)"
   [[ -n "$baseline_line" && -n "$active_line" && "$baseline_line" -lt "$active_line" ]] || fail "baseline receipt was not durably published before active receipt"
-  grep -q '^forward_only=true$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted forward-only state"
+   grep -q '^forward_only=true$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted forward-only state"
+   grep -q '^migration_120000_version=20260731120000$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted Flowise migration version"
+   grep -q '^migration_120000_name=add_flowise_quota_finalization$' "$state_dir/migrations-applied.receipt" || fail "migration receipt omitted Flowise migration name"
    grep -q "candidate_next_image=$next_image" "$state_dir/active.receipt" || fail "active receipt omitted requested image"
     if [[ "$FAKE_SCENARIO" == baseline_env_missing_python ]]; then
       grep -q '^baseline_python_node_env_state=implicit-production$' "$state_dir/active.receipt" || fail "missing baseline NODE_ENV was not recorded as implicit production"
@@ -437,11 +514,49 @@ run_success() {
   [[ "$(cat "$TMP_DIR/docker-state-success")" == baseline ]] || fail "successful cleanup did not restore baseline"
   [[ ! -e "$state_dir/active" ]] || fail "successful cleanup retained active marker"
   [[ -e "$state_dir/migrations-applied.receipt" ]] || fail "successful cleanup discarded durable migration receipt"
-  pass "both rendered candidate services are present with the exact development environment"
+pass "all four rendered candidate services preserve the exact development environment contract"
 }
 
 SUCCESS_SCENARIO=compose_image_default_env_omitted run_success
 unset DAIANA_COMPOSE_PROJECT_NAME
+
+run_prior_candidate_cleanup() {
+  local state_dir="$TMP_DIR/state-prior-candidate" old_front_sha='892c3e34c07b8d2c6b1c49736a90ba192bb6c3f8' command prior_state
+  state_dir="$TMP_DIR/state-prior-candidate"
+  mkdir -p "$state_dir"
+  printf 'baseline\n' > "$TMP_DIR/docker-state-prior-candidate"
+  : > "$TMP_DIR/docker-prior-candidate.log"
+  export FAKE_SCENARIO=none FAKE_STATE="$TMP_DIR/docker-state-prior-candidate" DOCKER_LOG="$TMP_DIR/docker-prior-candidate.log"
+  export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image" DAIANA_CANDIDATE_PYTHON_IMAGE="$python_image" DAIANA_CANDIDATE_MSTEAMS_IMAGE=cloudseidoranalytics/daianamsteams:sha-1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_CANDIDATE_STUDIO_IMAGE=cloudseidoranalytics/daianastudio:sha-ed872073e7f359e7b8c88c6c2a26f55c46582c69 DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69 PRIVATE_CHAT_PYTHON_ORIGIN="$python_origin"
+  export ALLOW_LOCAL_FEATURE_REFS=1 DAIANA_HARNESS_MODE=local-candidate DAIANA_HARNESS_OPERATION=candidate DAIANA_DEPLOYMENT_MODE=local-candidate DAIANA_HARNESS_NO_PUSH=1 DAIANA_HARNESS_NO_PUBLICATION=1 DAIANA_HARNESS_NO_REGISTRY_PUBLISH=1
+  export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER=supabase-db DAIANA_TEST_FLOWISE_MIGRATION="$flowise_migration" DAIANA_TEST_NEXT_MIGRATION="$next_migration" DAIANA_TEST_QUOTA_MIGRATION="$quota_migration" DAIANA_HARNESS_ALLOW_RUNTIME_MUTATION=yes
+  for command in preflight activate; do
+    prior_state="$TMP_DIR/state-prior-$command"
+    mkdir -p "$prior_state"
+    export DAIANA_HARNESS_STATE_DIR="$prior_state" DAIANA_CANDIDATE_NEXT_IMAGE="cloudseidoranalytics/daiana:sha-$old_front_sha"
+    if PATH="$FAKE_BIN:$PATH" bash "$harness" "$command" >/dev/null 2>&1; then
+      fail "prior Front candidate was accepted by $command"
+    fi
+  done
+  export DAIANA_HARNESS_STATE_DIR="$state_dir" DAIANA_CANDIDATE_NEXT_IMAGE="$next_image"
+  PATH="$FAKE_BIN:$PATH" bash "$harness" activate >/dev/null || fail "current candidate activation failed"
+  python3 - "$state_dir/baseline.receipt" "$state_dir/active.receipt" "$old_front_sha" <<'PY'
+from pathlib import Path
+import sys
+
+old_sha = sys.argv[3]
+for path in map(Path, sys.argv[1:3]):
+    contents = path.read_text()
+    contents = contents.replace("503d3c65bce2d9ec68d714010f680f702052c3dc", old_sha)
+    path.write_text(contents)
+PY
+  export DAIANA_CANDIDATE_NEXT_IMAGE="cloudseidoranalytics/daiana:sha-$old_front_sha"
+  PATH="$FAKE_BIN:$PATH" bash "$harness" cleanup >/dev/null || fail "prior active Front candidate was rejected by cleanup"
+  [[ "$(cat "$TMP_DIR/docker-state-prior-candidate")" == baseline ]] || fail "prior active candidate cleanup did not restore baseline"
+  pass "prior active candidate refs fail preflight/activation but remain accepted by cleanup"
+}
+
+run_prior_candidate_cleanup
 
 run_rejected_project_override() {
   local project="$1" state_dir
@@ -521,7 +636,17 @@ mutations = {
      "wrong_top_level_key": ("\nnetworks:\n", "\nx-unapproved: true\n\nnetworks:\n", 1),
      "wrong_network": ("    name: daiana-mgmt\n", "    name: wrong-network\n", 1),
      "wrong_image": ("    image: ${DAIANA_CANDIDATE_NEXT_IMAGE:?DAIANA_CANDIDATE_NEXT_IMAGE is required}\n", "    image: cloudseidoranalytics/daiana:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", 1),
-     "wrong_pull_policy": ("    pull_policy: never\n", "    pull_policy: always\n", 1),
+      "wrong_pull_policy": ("    pull_policy: never\n", "    pull_policy: always\n", 1),
+       "origin_public_http": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://example.com\n", 1),
+       "origin_public_nip_http": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api.8.8.8.8.nip.io\n", 1),
+       "origin_path": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://127.0.0.1:5002/path\n", 1),
+       "origin_query": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api.192.168.0.19.nip.io?x=1\n", 1),
+       "origin_fragment": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: 'http://api.192.168.0.19.nip.io#fragment'\n", 1),
+       "origin_credentials": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://user@api.192.168.0.19.nip.io\n", 1),
+       "origin_whitespace": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: 'http://api.192.168.0.19 .nip.io'\n", 1),
+       "origin_malformed_host": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://api..192.168.0.19.nip.io\n", 1),
+       "origin_wrong_service_placement": ("      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", "      PRIVATE_CHAT_PYTHON_ORIGIN: http://192.168.0.19.api.nip.io\n", 1),
+      "origin_python_service": ("  daianapython:\n    image: ${DAIANA_CANDIDATE_PYTHON_IMAGE:?DAIANA_CANDIDATE_PYTHON_IMAGE is required}\n    pull_policy: never\n", "  daianapython:\n    image: ${DAIANA_CANDIDATE_PYTHON_IMAGE:?DAIANA_CANDIDATE_PYTHON_IMAGE is required}\n    pull_policy: never\n    environment:\n      PRIVATE_CHAT_PYTHON_ORIGIN: ${PRIVATE_CHAT_PYTHON_ORIGIN:?PRIVATE_CHAT_PYTHON_ORIGIN is required}\n", 1),
      "malicious_yaml_tag": ("services:\n", "services:\n  !!python/object/apply:os.system [\"echo pwned\"]\n", 1),
      "invalid_yaml": ("services:\n", "services:\n  invalid_yaml_marker: [\n", 1),
 }
@@ -550,12 +675,12 @@ PY
 
  for overlay_mutation in \
    ports volumes command entrypoint depends_on extra_environment third_service extra_network \
-    wrong_top_level_key wrong_network wrong_image wrong_pull_policy malicious_yaml_tag invalid_yaml; do
+    wrong_top_level_key wrong_network wrong_image wrong_pull_policy origin_public_http origin_public_nip_http origin_path origin_query origin_fragment origin_credentials origin_whitespace origin_malformed_host origin_wrong_service_placement origin_python_service malicious_yaml_tag invalid_yaml; do
   run_overlay_rejection "$overlay_mutation"
 done
 
 grep -q '^COMPOSE_PROJECT_NAME="daiana-app"$' "$harness" || fail "Compose project identity is still environment-overridable"
-grep -q 'COMPOSE_MUTATION_SERVICES=(daianapython daiananext)' "$harness" || fail "candidate mutation service scope is not fixed"
+grep -q 'COMPOSE_MUTATION_SERVICES=(daianapython daiananext daianamsteams daianastudio)' "$harness" || fail "candidate mutation service scope is not fixed"
 grep -q 'config --format json' "$harness" || fail "canonical rendered Compose JSON validation is missing"
 grep -q 'object_pairs_hook' "$harness" || fail "duplicate JSON key rejection is missing"
 pass "canonical full-model JSON validation and fixed mutation scope are present"

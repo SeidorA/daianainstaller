@@ -18,6 +18,15 @@ services:
     environment:
       NODE_ENV: development
       PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN: "true"
+      TEAMS_INTERNAL_AUTH_SECRET: ${TEAMS_INTERNAL_AUTH_SECRET:?TEAMS_INTERNAL_AUTH_SECRET is required}
+  daianamsteams:
+    image: ${DAIANA_CANDIDATE_MSTEAMS_IMAGE:?DAIANA_CANDIDATE_MSTEAMS_IMAGE is required}
+    pull_policy: never
+    environment:
+      TEAMS_INTERNAL_AUTH_SECRET: ${TEAMS_INTERNAL_AUTH_SECRET:?TEAMS_INTERNAL_AUTH_SECRET is required}
+  daianastudio:
+    image: ${DAIANA_CANDIDATE_STUDIO_IMAGE:?DAIANA_CANDIDATE_STUDIO_IMAGE is required}
+    pull_policy: never
 
 networks:
   default:
