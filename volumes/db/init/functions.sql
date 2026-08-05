@@ -888,7 +888,9 @@ BEGIN
       'trial',
         jsonb_build_object(
         'domain', tenant_domain,
-        'created_by', NEW.id
+        'created_by', NEW.id,
+        'secretSeed', gen_random_uuid()::text,
+        'teamsSecret', 'waHW4b2Kfe_OoYXxnSUscqIMuESvQhunKt6deG1uXyU='
       )
     )
     RETURNING "idTenant" INTO existing_tenant_id;
@@ -916,7 +918,9 @@ BEGIN
       'trial',
         jsonb_build_object(
         'domain', tenant_domain,
-        'created_by', NEW.id
+        'created_by', NEW.id,
+        'secretSeed', gen_random_uuid()::text,
+        'teamsSecret', 'waHW4b2Kfe_OoYXxnSUscqIMuESvQhunKt6deG1uXyU='
       )
     )
     RETURNING "idTenant" INTO existing_tenant_id;
