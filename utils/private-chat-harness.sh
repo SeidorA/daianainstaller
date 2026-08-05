@@ -22,6 +22,12 @@ APPROVED_NEXT_IMAGE_REPOSITORY="cloudseidoranalytics/daiana"
 APPROVED_PYTHON_IMAGE_REPOSITORY="cloudseidoranalytics/daianapython"
 APPROVED_MSTEAMS_IMAGE_REPOSITORY="cloudseidoranalytics/daianamsteams"
 APPROVED_STUDIO_IMAGE_REPOSITORY="cloudseidoranalytics/daianastudio"
+# Each entry is Front|Python|Teams|Studio. Keep candidate and caller-supplied
+# source SHAs bound to the same explicit approved tuple.
+APPROVED_SOURCE_TUPLES=(
+  '503d3c65bce2d9ec68d714010f680f702052c3dc|68565fb1870da340a6f5f3f6bc258f7bf3d70ab8|1571fc1e7e7f11038168dd1a6673cdd50777efa1|ed872073e7f359e7b8c88c6c2a26f55c46582c69'
+  '503d3c65bce2d9ec68d714010f680f702052c3dc|68565fb1870da340a6f5f3f6bc258f7bf3d70ab8|28174f50391b6fa83d7cf97382a756f5d2f5fcb1|ed872073e7f359e7b8c88c6c2a26f55c46582c69'
+)
 MIGRATION_120000="20260731120000_add_flowise_quota_finalization.sql"
 MIGRATION_130000="20260727130000_add_history_message_refs.sql"
 MIGRATION_140000="20260727140000_allow_authorized_private_message_quota.sql"
@@ -878,6 +884,14 @@ image_source_sha() {
   printf '%s\n' "${tag#sha-}"
 }
 
+approved_source_tuple() {
+  local candidate_tuple="$1" approved_tuple
+  for approved_tuple in "${APPROVED_SOURCE_TUPLES[@]}"; do
+    [[ "$candidate_tuple" == "$approved_tuple" ]] && return 0
+  done
+  return 1
+}
+
 require_local_candidate_context() {
   [[ "${DAIANA_HARNESS_MODE:-}" == local-candidate ]] || die "feature-ref exception requires local candidate mode"
   [[ "${DAIANA_HARNESS_NO_PUSH:-}" == 1 ]] || die "feature-ref exception requires no-push invariant"
@@ -892,6 +906,7 @@ validate_candidate_source_refs() {
   local next_sha python_sha msteams_sha studio_sha front_repo python_repo msteams_repo studio_repo
   local front_base_ref python_base_ref msteams_base_ref studio_base_ref
   local approved_next_sha approved_python_sha approved_msteams_sha approved_studio_sha
+  local candidate_tuple approved_tuple
   local cleanup_mode="${1:-}" active_receipt="${2:-}"
   require_local_candidate_context
   [[ "${DAIANA_CANDIDATE_NEXT_IMAGE:-}" == "$APPROVED_NEXT_IMAGE_REPOSITORY":* ]] || die "Next candidate image must use the approved repository"
@@ -935,23 +950,15 @@ validate_candidate_source_refs() {
   approved_python_sha="${DAIANA_APPROVED_PYTHON_SOURCE_SHA:-}"
   approved_msteams_sha="${DAIANA_APPROVED_MSTEAMS_SOURCE_SHA:-}"
   approved_studio_sha="${DAIANA_APPROVED_STUDIO_SOURCE_SHA:-}"
-  if [[ "$next_sha" == 503d3c65bce2d9ec68d714010f680f702052c3dc \
-     && "$python_sha" == 68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 \
-      && "$msteams_sha" == 1571fc1e7e7f11038168dd1a6673cdd50777efa1 \
-     && "$studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]]; then
+  candidate_tuple="$next_sha|$python_sha|$msteams_sha|$studio_sha"
+  approved_tuple="$approved_next_sha|$approved_python_sha|$approved_msteams_sha|$approved_studio_sha"
+  if approved_source_tuple "$candidate_tuple"; then
     [[ "${ALLOW_LOCAL_FEATURE_REFS:-}" == 1 ]] || die "approved feature refs require ALLOW_LOCAL_FEATURE_REFS=1"
     [[ "$approved_next_sha" =~ ^[a-f0-9]{40}$ \
       && "$approved_python_sha" =~ ^[a-f0-9]{40}$ \
       && "$approved_msteams_sha" =~ ^[a-f0-9]{40}$ \
       && "$approved_studio_sha" =~ ^[a-f0-9]{40}$ ]] || die "all four services require explicit full-SHA allowlist inputs"
-    [[ "$approved_next_sha" == 503d3c65bce2d9ec68d714010f680f702052c3dc \
-      && "$approved_python_sha" == 68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 \
-      && "$approved_msteams_sha" == 1571fc1e7e7f11038168dd1a6673cdd50777efa1 \
-      && "$approved_studio_sha" == ed872073e7f359e7b8c88c6c2a26f55c46582c69 ]] || die "caller-supplied source SHA allowlist is not approved"
-    [[ "$next_sha" == "$approved_next_sha" \
-      && "$python_sha" == "$approved_python_sha" \
-      && "$msteams_sha" == "$approved_msteams_sha" \
-      && "$studio_sha" == "$approved_studio_sha" ]] || die "candidate source SHA does not match the approved four-service allowlist"
+    [[ "$approved_tuple" == "$candidate_tuple" ]] || die "caller-supplied source SHA allowlist is not approved"
     return 0
   fi
   git -C "$front_repo" rev-parse --verify "$front_base_ref^{commit}" >/dev/null 2>&1 || die "Front repository develop ref is unavailable"

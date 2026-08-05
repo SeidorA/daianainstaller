@@ -53,6 +53,11 @@ local_guard=(ALLOW_LOCAL_FEATURE_REFS=1 "${local_guard[@]}")
 env "${approved_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "approved refs with opt-in rejected"
 pass "exact approved full SHAs pass only with local opt-in and guards"
 
+approved_msteams_new='cloudseidoranalytics/daianamsteams:sha-28174f50391b6fa83d7cf97382a756f5d2f5fcb1'
+approved_new_env=(DAIANA_FRONT_REPO="$ROOT_DIR/../daiananext" DAIANA_PYTHON_REPO="$ROOT_DIR/../daianapython" DAIANA_MSTEAMS_REPO="$ROOT_DIR/../daianamsteams" DAIANA_STUDIO_REPO="$ROOT_DIR/../daianastudio" DAIANA_CANDIDATE_NEXT_IMAGE="$approved_next" DAIANA_CANDIDATE_PYTHON_IMAGE="$approved_python" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams_new" DAIANA_CANDIDATE_STUDIO_IMAGE="$approved_studio" DAIANA_APPROVED_NEXT_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc DAIANA_APPROVED_PYTHON_SOURCE_SHA=68565fb1870da340a6f5f3f6bc258f7bf3d70ab8 DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=28174f50391b6fa83d7cf97382a756f5d2f5fcb1 DAIANA_APPROVED_STUDIO_SOURCE_SHA=ed872073e7f359e7b8c88c6c2a26f55c46582c69)
+env "${approved_new_env[@]}" "${local_guard[@]}" bash "$harness" validate-source-refs >/dev/null || fail "new approved Teams tuple rejected"
+pass "new Teams tuple passes only with exact approved full SHAs and local guards"
+
 expect_reject() {
   if env "$@" bash "$harness" validate-source-refs >/dev/null 2>&1; then fail "invalid source-ref case was accepted"; fi
 }
@@ -63,6 +68,8 @@ expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_NEXT_IMA
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_PYTHON_IMAGE='cloudseidoranalytics/daianapython:sha-503d3c65bce2d9ec68d714010f680f702052c3dc'
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_APPROVED_PYTHON_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_APPROVED_STUDIO_SOURCE_SHA=503d3c65bce2d9ec68d714010f680f702052c3dc
+expect_reject "${approved_new_env[@]}" "${local_guard[@]}" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=1571fc1e7e7f11038168dd1a6673cdd50777efa1
+expect_reject "${approved_new_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_MSTEAMS_IMAGE="$approved_msteams" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=28174f50391b6fa83d7cf97382a756f5d2f5fcb1
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_NEXT_IMAGE='attacker/daiana:sha-503d3c65bce2d9ec68d714010f680f702052c3dc'
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_CANDIDATE_MSTEAMS_IMAGE='cloudseidoranalytics/daianamsteams:sha-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' DAIANA_APPROVED_MSTEAMS_SOURCE_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_APPROVED_MSTEAMS_SOURCE_SHA= DAIANA_APPROVED_STUDIO_SOURCE_SHA=
@@ -87,6 +94,9 @@ expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_HARNESS_PUSH=1
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_HARNESS_PUBLISH=1
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_HARNESS_REGISTRY_PUBLISH=1
 expect_reject "${approved_env[@]}" "${local_guard[@]}" DAIANA_FEATURE_BASE_REF=attacker
+for guard in DAIANA_HARNESS_MODE DAIANA_HARNESS_OPERATION DAIANA_DEPLOYMENT_MODE DAIANA_HARNESS_NO_PUSH DAIANA_HARNESS_NO_PUBLICATION DAIANA_HARNESS_NO_REGISTRY_PUBLISH; do
+  expect_reject "${approved_new_env[@]}" ALLOW_LOCAL_FEATURE_REFS=1 "${local_guard[@]}" "$guard="
+done
 
 attacker_repo="$TMP_DIR/attacker-base"
 attacker_sha="$(make_repo "$attacker_repo")"
