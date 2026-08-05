@@ -1244,6 +1244,11 @@ portainer_restore_temp_traps() {
   return "$status"
 }
 
+portainer_isolate_child_traps() {
+  # A request subshell owns its temp scope; never inherit its caller's handlers.
+  trap - EXIT INT TERM HUP
+}
+
 portainer_temp_trap() {
   local signal="$1" status=$? previous_trap="" cleanup_status=0 restore_status=0 previous_status=0
   case "$signal" in
@@ -1325,6 +1330,7 @@ portainer_temp_create() {
 portainer_request_json() {
   (
     case "$-" in *x*) set +x ;; esac
+    portainer_isolate_child_traps
     local method="$1" path="$2" data="${3:-}" tmp
     local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
     local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
@@ -1338,6 +1344,7 @@ portainer_request_json() {
 portainer_request_json_file() {
   (
     case "$-" in *x*) set +x ;; esac
+    portainer_isolate_child_traps
     local method="$1" path="$2" data_file="${3:-}" allowed_status="${4:-}" response status body config curl_status=0
     local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
     local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
@@ -1393,6 +1400,7 @@ portainer_request_json_file_with_status() {
 portainer_request_form() {
   (
     case "$-" in *x*) set +x ;; esac
+    portainer_isolate_child_traps
     local method="$1" path="$2" response status body config curl_status=0
     local PORTAINER_TEMP_FILES=() PORTAINER_TEMP_SCOPE_DEPTH=-1
     local PORTAINER_PREVIOUS_EXIT_TRAPS=() PORTAINER_PREVIOUS_INT_TRAPS=() PORTAINER_PREVIOUS_TERM_TRAPS=() PORTAINER_PREVIOUS_HUP_TRAPS=()
