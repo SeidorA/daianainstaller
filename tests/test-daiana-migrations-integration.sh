@@ -72,6 +72,15 @@ SQL
   migration_dir="$work_dir/migrations"
   drift_dir="$work_dir/drift"
   mkdir -p "$migration_dir" "$drift_dir"
+  cat > "$work_dir/tenant-secret-schema.sql" <<'SQL'
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+ALTER TABLE public.tenants ADD COLUMN settings jsonb;
+UPDATE public.tenants
+SET settings = '{"created_by":"qa","domain":"example.test"}'
+WHERE "idTenant" = 1;
+SQL
+  docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 < "$work_dir/tenant-secret-schema.sql" >/dev/null
+  cp "$ROOT_DIR/volumes/db/daiana-migrations/20260805120000_backfill_tenant_secrets.sql" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$migration_dir/"
 
   export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container"
@@ -94,7 +103,7 @@ SQL
   [ "$lock_elapsed" -ge 2 ] || die "PostgreSQL $pg_version runner did not wait for the global advisory lock"
 
   result="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
-    SELECT count(*) = 2 FROM private.daiana_installer_schema_migrations;
+    SELECT count(*) = 3 FROM private.daiana_installer_schema_migrations;
     SELECT checksum = 'a006dd4648b127b2cd2629f1a60364d759c729c9469a2978deb754ae6837c689' FROM private.daiana_installer_schema_migrations WHERE version = '20260717120000';
     SELECT checksum = 'ad89ebdecb3a138be57fcc0535bb73a7569468c7cb518188f4709e1894f1f528' FROM private.daiana_installer_schema_migrations WHERE version = '20260725170000';
     SELECT result->>'legacy' = 'true' FROM public.tenant_message_quota_reservations WHERE \"requestId\" = 'pre-replay' AND source = 'integration';
@@ -327,13 +336,33 @@ SQL
   fi
   [[ "$conflict_error" == *'Conflicting fixed Studio organization mapping'* ]] || die "PostgreSQL $pg_version mapping conflict failure was unclear"
 
+  docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+INSERT INTO public.tenants VALUES
+  (2, '{"created_by":"qa","domain":"example.test"}'),
+  (3, '{"secretSeed":"  ","teamsSecret":"valid-teams"}'),
+  (4, '{"secretSeed":"valid-seed","teamsSecret":"  "}');
+SQL
+  docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "$(command cat "$ROOT_DIR/volumes/db/daiana-migrations/20260805120000_backfill_tenant_secrets.sql")" >/dev/null
+  tenant_secret_result="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
+    SELECT settings->>'secretSeed' ~ '^[0-9a-f-]{36}$' AND settings->>'teamsSecret' = 'waHW4b2Kfe_OoYXxnSUscqIMuESvQhunKt6deG1uXyU=' FROM public.tenants WHERE \"idTenant\" = 1;
+    SELECT settings ? 'secretSeed' AND settings->>'teamsSecret' = 'waHW4b2Kfe_OoYXxnSUscqIMuESvQhunKt6deG1uXyU=' FROM public.tenants WHERE \"idTenant\" = 2;
+    SELECT settings->>'secretSeed' <> '' AND settings->>'teamsSecret' = 'valid-teams' FROM public.tenants WHERE \"idTenant\" = 3;
+    SELECT settings->>'secretSeed' = 'valid-seed' AND settings->>'teamsSecret' = 'waHW4b2Kfe_OoYXxnSUscqIMuESvQhunKt6deG1uXyU=' FROM public.tenants WHERE \"idTenant\" = 4;
+    SELECT count(*) = 4 FROM public.tenants WHERE settings ? 'secretSeed' AND settings ? 'teamsSecret';")"
+  [ "$(printf '%s\n' "$tenant_secret_result" | grep -c '^t$')" -eq 5 ] || die "tenant secret backfill/default/non-overwrite checks failed"
+  tenant_seed_before="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT settings->>'secretSeed' FROM public.tenants WHERE \"idTenant\" = 2;")"
+  docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "$(command cat "$ROOT_DIR/volumes/db/daiana-migrations/20260805120000_backfill_tenant_secrets.sql")" >/dev/null
+  tenant_seed_after="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT settings->>'secretSeed' FROM public.tenants WHERE \"idTenant\" = 2;")"
+  [ "$tenant_seed_before" = "$tenant_seed_after" ] || die "tenant secret backfill is not idempotent"
+  printf 'PASS: PostgreSQL %s tenant secret backfill randomness/default/non-overwrite/idempotency checks\n' "$pg_version"
+
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$drift_dir/20260717120000_add_shared_message_quota.sql"
   printf '\n-- checksum drift test\n' >> "$drift_dir/20260717120000_add_shared_message_quota.sql"
   DAIANA_MIGRATIONS_DIR="$drift_dir"
   export DAIANA_MIGRATIONS_DIR
   if run_daiana_migrations; then die "PostgreSQL $pg_version checksum drift was accepted"; fi
   count="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc 'SELECT count(*) FROM private.daiana_installer_schema_migrations;')"
-  [ "$count" = 2 ] || die "PostgreSQL $pg_version drift changed history"
+  [ "$count" = 3 ] || die "PostgreSQL $pg_version drift changed history"
 
   rm -f "$drift_dir/20260717120000_add_shared_message_quota.sql"
   printf 'CREATE TABLE public.must_rollback(id integer);\nSELECT 1/0;\n' > "$drift_dir/20260717130000_failure.sql"
