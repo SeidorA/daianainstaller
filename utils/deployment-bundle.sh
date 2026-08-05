@@ -22,13 +22,20 @@ deployment_bundle_sha256() {
 }
 
 validate_deployment_bundle() {
-  local document="$1" component reference digest source_commit suffix index
-  local -a components=(next python studio)
+  local document="$1" component reference digest source_commit suffix index schema_version
+  local -a components
+  schema_version="$(jq -r '.schema_version // empty' <<<"$document")"
+  case "$schema_version" in
+    1) components=(next python studio) ;;
+    2) components=(next python msteams studio) ;;
+    *) die "Unsupported deployment bundle schema version: $schema_version"; return 1 ;;
+  esac
   jq -e '. as $bundle |
-    .schema_version == 1 and
+    (.schema_version == 1 or .schema_version == 2) and
     .deployment_mode == "complete-stack-replacement" and
-    (.images | type == "object" and keys == ["next", "python", "studio"]) and
-    (["next", "python", "studio"] | all(. as $name |
+    ((.schema_version == 1 and (.images | type == "object" and keys == ["next", "python", "studio"])) or
+     (.schema_version == 2 and (.images | type == "object" and keys == ["msteams", "next", "python", "studio"]))) and
+    ((if .schema_version == 1 then ["next", "python", "studio"] else ["next", "python", "msteams", "studio"] end) | all(. as $name |
       ($bundle.images[$name] | type == "object") and
       ($bundle.images[$name] | keys == ["index_digest", "reference", "source_commit"]) and
       ($bundle.images[$name].reference | type == "string") and
@@ -38,7 +45,8 @@ validate_deployment_bundle() {
     || { die "Invalid complete deployment bundle structure"; return 1; }
 
   local fields
-  fields="$(jq -r '[.images.next, .images.python, .images.studio] | map([.reference, .index_digest, .source_commit] | @tsv) | .[]' <<<"$document")"
+  fields="$(jq -r --argjson components "$(printf '%s\n' "${components[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" \
+    '[.images[$components[]]] | map([.reference, .index_digest, .source_commit] | @tsv) | .[]' <<<"$document")"
   index=0
   while IFS=$'\t' read -r reference digest source_commit; do
     component="${components[$index]}"
@@ -60,16 +68,25 @@ load_deployment_bundle() {
   # Consumed by the sourcing installer as the immutable selection marker.
   # shellcheck disable=SC2034
   BUNDLE_ACTIVE=1
-  IFS=$'\t' read -r BUNDLE_NEXT_IMAGE BUNDLE_PYTHON_IMAGE BUNDLE_STUDIO_IMAGE < <(
-    jq -r '[.images.next.reference, .images.python.reference, .images.studio.reference] | @tsv' <<<"$BUNDLE_DOCUMENT"
+  IFS=$'\t' read -r BUNDLE_NEXT_IMAGE BUNDLE_PYTHON_IMAGE BUNDLE_MSTEAMS_IMAGE BUNDLE_STUDIO_IMAGE < <(
+    jq -r 'if .schema_version == 2
+      then [.images.next.reference, .images.python.reference, .images.msteams.reference, .images.studio.reference]
+      else [.images.next.reference, .images.python.reference, "__legacy_no_msteams__", .images.studio.reference]
+      end | @tsv' <<<"$BUNDLE_DOCUMENT"
   )
+  [ "$BUNDLE_MSTEAMS_IMAGE" = "__legacy_no_msteams__" ] && BUNDLE_MSTEAMS_IMAGE=""
   BUNDLE_SHA256="$(deployment_bundle_sha256 "$BUNDLE_DOCUMENT")"
 }
 
 write_deployment_bundle_override() {
   local output_file="$1"
-  jq -n --arg next "$BUNDLE_NEXT_IMAGE" --arg python "$BUNDLE_PYTHON_IMAGE" --arg studio "$BUNDLE_STUDIO_IMAGE" \
-    '{services:{daiananext:{image:$next},daianapython:{image:$python},daianastudio:{image:$studio}}}' > "$output_file"
+  if [ -n "${BUNDLE_MSTEAMS_IMAGE:-}" ]; then
+    jq -n --arg next "$BUNDLE_NEXT_IMAGE" --arg python "$BUNDLE_PYTHON_IMAGE" --arg msteams "$BUNDLE_MSTEAMS_IMAGE" --arg studio "$BUNDLE_STUDIO_IMAGE" \
+      '{services:{daiananext:{image:$next},daianapython:{image:$python},daianamsteams:{image:$msteams},daianastudio:{image:$studio}}}' > "$output_file"
+  else
+    jq -n --arg next "$BUNDLE_NEXT_IMAGE" --arg python "$BUNDLE_PYTHON_IMAGE" --arg studio "$BUNDLE_STUDIO_IMAGE" \
+      '{services:{daiananext:{image:$next},daianapython:{image:$python},daianastudio:{image:$studio}}}' > "$output_file"
+  fi
 }
 
 deployment_bundle_metadata_json() {
@@ -90,7 +107,8 @@ read_snapshot_env() {
 
 prepull_deployment_bundle_images() {
   local image
-  for image in "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_NEXT_IMAGE" "$BUNDLE_STUDIO_IMAGE"; do
+  for image in "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_NEXT_IMAGE" "${BUNDLE_MSTEAMS_IMAGE:-}" "$BUNDLE_STUDIO_IMAGE"; do
+    [ -n "$image" ] || continue
     docker_cmd pull "$image" || { die "Failed to pre-pull deployment bundle image: $image"; return 1; }
   done
 }
