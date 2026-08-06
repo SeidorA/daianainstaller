@@ -499,6 +499,7 @@ load_dotenv() {
     esac
   done < "$file"
   if (( xtrace_was_enabled )); then set -x; fi
+  return 0
 }
 
 load_dotenv .env 0
@@ -1957,6 +1958,7 @@ cleanup_update_compose_overrides() {
   for file in "$UPDATE_COMPOSE_OVERRIDE_FILE" "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE"; do
     [ -n "$file" ] && rm -f -- "$file"
   done
+  return 0
 }
 trap cleanup_update_compose_overrides EXIT
 

@@ -1,6 +1,6 @@
 services:
   daiananext:
-    image: cloudseidoranalytics/daiana:v2.1.9
+    image: cloudseidoranalytics/daiana:v2.3.0
     container_name: daiana-next
     restart: unless-stopped
     volumes:
@@ -13,12 +13,13 @@ services:
       PRIVATE_CHAT_PYTHON_ORIGIN: ${BACKEND_BASE_URL}
       WEBUI_PUBLIC_URL: ${WEBUI_BASE_URL}
       WEBUI_AUTH_HANDOFF_SECRET: ${WEBUI_AUTH_HANDOFF_SECRET:-}
+      PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN: ${PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN:-false}
     depends_on:
       daianapython:
         condition: service_healthy
 
   daianapython:
-    image: cloudseidoranalytics/daianapython:v2.1.9
+    image: cloudseidoranalytics/daianapython:v2.3.0
     container_name: daiana-python
     restart: unless-stopped
     working_dir: /app
@@ -70,7 +71,7 @@ services:
       start_period: 30s
 
   daianavanna:
-    image: cloudseidoranalytics/daianavanna:v2.1.9
+    image: cloudseidoranalytics/daianavanna:v2.3.0
     container_name: daiana-vanna
     restart: unless-stopped
     working_dir: /app
@@ -99,7 +100,7 @@ services:
         condition: service_healthy
 
   daianamsteams:
-    image: cloudseidoranalytics/daianamsteams:v2.1.9
+    image: cloudseidoranalytics/daianamsteams:v2.3.0
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
@@ -113,7 +114,7 @@ services:
 
   daianawhatsapp:
      container_name: daiana-whatsapp
-     image: cloudseidoranalytics/daianawhatsapp:v2.1.9
+     image: cloudseidoranalytics/daianawhatsapp:v2.3.0
      restart: unless-stopped
      environment:
       PYTHONUNBUFFERED: 1
@@ -132,7 +133,7 @@ services:
          condition: service_healthy
 
   daianastudio:
-    image: cloudseidoranalytics/daianastudio:v3.1.3
+    image: cloudseidoranalytics/daianastudio:latest
     container_name: daiana-studio
     restart: unless-stopped
     environment:
