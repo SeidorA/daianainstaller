@@ -2,6 +2,7 @@
 .atl/
 .pi/
 .codegraph/
+.playwright-cli/
 
 # Local environment / OS noise
 .env*
