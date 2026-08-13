@@ -3,9 +3,9 @@
   "deployment_mode": "complete-stack-replacement",
   "images": {
     "next": {
-      "reference": "cloudseidoranalytics/daiana@sha256:a5934324532f0b860bf35ce639d1bfabf565f9041e914be9c023e6311aed1964",
-      "index_digest": "sha256:a5934324532f0b860bf35ce639d1bfabf565f9041e914be9c023e6311aed1964",
-      "source_commit": "4d79534cf3c1e636b6ef971473d7a3fd9f1674ff"
+      "reference": "cloudseidoranalytics/daiana@sha256:2d526e051a36d22b65bed95bf9e70430b643a15f5766e9ceaa9b9a8afa6369ef",
+      "index_digest": "sha256:2d526e051a36d22b65bed95bf9e70430b643a15f5766e9ceaa9b9a8afa6369ef",
+      "source_commit": "d95b25edce2cd168fe1062dd7dea2da76e582e98"
     },
     "python": {
       "reference": "cloudseidoranalytics/daianapython@sha256:612d10cbfede126555592bc52a4bf7fac9adb121645e42d9a5be547ce83a546c",
