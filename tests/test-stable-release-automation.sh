@@ -44,5 +44,7 @@ grep -Fq 'validate_source_run' "$script" || fail "source run validation is missi
 grep -Fq 'Docker Hub read credentials are required' "$script" || fail "registry credentials are not required"
 grep -Fq 'architecture == "amd64"' "$script" || fail "amd64 validation is missing"
 grep -Fq 'architecture == "arm64"' "$script" || fail "arm64 validation is missing"
+# shellcheck disable=SC2016 # Literal Perl expression expected in the script.
+grep -Fq '^[ \t]*\Q$service\E:' "$script" || fail "compose pin update is not indentation tolerant"
 grep -Fq 'schema_version:3' "$script" || fail "schema-v3 bundle generation is missing"
 pass "stable release workflow fails closed and creates review-only PRs"
