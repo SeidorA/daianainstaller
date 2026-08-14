@@ -18,6 +18,10 @@ done
 grep -Fq 'ref: main' "$workflow" || fail "workflow does not prepare from main"
 # shellcheck disable=SC2016 # Literal GitHub Actions expression.
 grep -Fq 'GH_TOKEN: ${{ secrets.FRONT_RELEASE_READ_TOKEN }}' "$workflow" || fail "release validation does not use the scoped Front read token"
+# shellcheck disable=SC2016 # Literal GitHub Actions expressions.
+grep -Fq 'DAIANA_REGISTRY_USERNAME: ${{ secrets.DAIANA_REGISTRY_USERNAME }}' "$workflow" || fail "workflow does not provide registry username"
+# shellcheck disable=SC2016 # Literal GitHub Actions expressions.
+grep -Fq 'DAIANA_REGISTRY_PULL_TOKEN: ${{ secrets.DAIANA_REGISTRY_PULL_TOKEN }}' "$workflow" || fail "workflow does not provide registry pull token"
 grep -Fq "git push origin \"HEAD:refs/heads/\${branch}\"" "$workflow" || fail "workflow branch push contract changed"
 grep -Fq "GH_TOKEN=\"\$GITHUB_TOKEN\" gh pr create" "$workflow" || fail "PR creation does not use GITHUB_TOKEN"
 grep -Fq "gh pr edit \"\$pr_url\" --add-label type:chore" "$workflow" || fail "PR type label is missing"
@@ -37,6 +41,7 @@ grep -Fq 'Front lightweight tag $VERSION does not resolve to a commit' "$script"
 # shellcheck disable=SC2016 # Literal shell source match.
 grep -Fq 'Front annotated tag $VERSION does not resolve to a commit' "$script" || fail "annotated tag validation is missing"
 grep -Fq 'validate_source_run' "$script" || fail "source run validation is missing"
+grep -Fq 'Docker Hub read credentials are required' "$script" || fail "registry credentials are not required"
 grep -Fq 'architecture == "amd64"' "$script" || fail "amd64 validation is missing"
 grep -Fq 'architecture == "arm64"' "$script" || fail "arm64 validation is missing"
 grep -Fq 'schema_version:3' "$script" || fail "schema-v3 bundle generation is missing"

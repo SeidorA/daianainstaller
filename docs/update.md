@@ -107,6 +107,9 @@ Rules:
 The `Prepare stable release update` workflow uses `FRONT_RELEASE_READ_TOKEN` only to read
 release, tag, and workflow-run metadata from the Front repository. Configure it as a
 fine-grained token restricted to Front with read-only Contents and Actions permissions.
+It also uses `DAIANA_REGISTRY_USERNAME` and `DAIANA_REGISTRY_PULL_TOKEN` only to read
+private Docker Hub OCI indexes for the five application images. Configure a Docker Hub
+read-only token; neither credential is included in generated branches or pull requests.
 The workflow uses its own `GITHUB_TOKEN` only to create a review branch and pull request
 in Installer; it never deploys an environment.
 
