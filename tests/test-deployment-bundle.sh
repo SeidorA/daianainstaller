@@ -148,8 +148,8 @@ pass "missing or invalid Teams image data fails closed"
 if grep -Eq 'BUNDLE_SCOPE|rollout_order' "$ROOT_DIR/utils/deployment-bundle.sh" "$ROOT_DIR/install-daiana.sh" "$ROOT_DIR/docs/update.md"; then
   fail "obsolete partial scope or rollout contract remains"
 fi
-grep -q '^    image: cloudseidoranalytics/daiana:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Next default pin changed"
-grep -q '^    image: cloudseidoranalytics/daianapython:v2.1.9$' "$ROOT_DIR/docker-compose.app.yml" || fail "Python default pin changed"
+grep -q '^    image: cloudseidoranalytics/daiana:v2.3.0$' "$ROOT_DIR/docker-compose.app.yml" || fail "Next default pin changed"
+grep -q '^    image: cloudseidoranalytics/daianapython:v2.3.0$' "$ROOT_DIR/docker-compose.app.yml" || fail "Python default pin changed"
 grep -q '^    image: cloudseidoranalytics/daianastudio:v3.1.3$' "$ROOT_DIR/docker-compose.app.yml" || fail "Studio default pin changed"
 pass "partial scopes are absent and default pins remain literal"
 

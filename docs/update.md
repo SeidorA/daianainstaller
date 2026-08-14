@@ -39,6 +39,17 @@ Migrations under `volumes/db/daiana-migrations/` are forward-only. The installer
 
 Take a PostgreSQL backup before updating. The installer rollback command restores compose/images only and cannot reverse database migrations. PostgreSQL 15 and 17 are supported.
 
+## Manual Portainer deployments
+
+Manual installations do not have the Installer checkout or its migration ledger. Use this path when the application stack is managed directly in Portainer:
+
+1. Back up PostgreSQL and record the backup checksum.
+2. Apply the catalog migrations manually with `psql` before changing application images. The compatibility migration detects the standard `studio` schema and the manual-install `daianastudio` schema, and grants the catalog RPC only to `service_role`.
+3. In Portainer, edit the existing integrated stack and change only the `daiananext` image to its immutable digest. Preserve `supabase-studio`, Supabase services, environment variables, volumes, and unrelated Daiana services.
+4. Redeploy the stack and verify Next, Studio, the catalog RPC privileges, and the Management Plan selector.
+
+Manual installations must not invent or populate `private.daiana_installer_schema_migrations` without an approved reconciliation procedure. Keep the PostgreSQL backup and the Portainer stack definition as the rollback evidence. Image rollback does not reverse manually applied migrations.
+
 ## Main Daiana app version
 
 The main Daiana app version applies to these images together:
