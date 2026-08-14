@@ -1522,4 +1522,11 @@ PATH="$MOCK_BIN:$PATH" \
      ! verify_certificate_metadata_for_domain 42 nginx.example.test
   ' _ "$SCRIPT"
 
+  PATH="$MOCK_BIN:$PATH" \
+  bash -c '
+    source "$1"
+    api_get() { printf "{\"id\":43,\"provider\":\"letsencrypt\",\"status\":null,\"domain_names\":[\"nginx.example.test\"],\"expires_on\":\"2099-01-01T00:00:00Z\"}"; }
+    verify_certificate_metadata_for_domain 43 nginx.example.test
+  ' _ "$SCRIPT"
+
 printf 'NPM bootstrap resilience mock tests passed\n'

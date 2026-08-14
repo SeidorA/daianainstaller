@@ -792,7 +792,9 @@ verify_certificate_metadata_for_domain() {
   status="$(jq -r '.status // empty' <<<"$certificate")"
   case "$provider" in
     letsencrypt)
-      if [[ "$status" != "issued" ]]; then
+      # Older NPM API responses omit status for an otherwise valid certificate.
+      # Reject explicit non-issued states, but accept the legacy empty value.
+      if [[ -n "$status" && "$status" != "issued" ]]; then
         echo "NPM certificate verification failed for $domain (ACME status invalid; response redacted)." >&2
         return 1
       fi
