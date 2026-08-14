@@ -21,7 +21,7 @@ BEGIN
     END IF;
 
     RETURN QUERY EXECUTE format(
-        'SELECT organization.id::text, organization.name, workspace.id::text, workspace.name
+        'SELECT organization.id::text, organization.name::text, workspace.id::text, workspace.name::text
          FROM %I.organization organization
          LEFT JOIN %I.workspace workspace ON workspace."organizationId" = organization.id
          ORDER BY organization.name, workspace.name',
