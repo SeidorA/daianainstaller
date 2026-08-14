@@ -44,7 +44,10 @@ validate_source_run() {
 }
 
 registry_token() {
-  curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$NAMESPACE/$1:pull" | jq -er '.token | select(type == "string" and length > 0)'
+  local image="$1"
+  [[ -n "${DAIANA_REGISTRY_USERNAME:-}" && -n "${DAIANA_REGISTRY_PULL_TOKEN:-}" ]] || die "Docker Hub read credentials are required"
+  curl -fsSL --user "$DAIANA_REGISTRY_USERNAME:$DAIANA_REGISTRY_PULL_TOKEN" \
+    "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$NAMESPACE/$image:pull" | jq -er '.token | select(type == "string" and length > 0)'
 }
 
 resolve_index_digest() {
