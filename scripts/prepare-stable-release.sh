@@ -13,17 +13,27 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command is unavailable: $1"; }
 
 release_commit() {
-  local release ref tag_sha tag
+  local release ref tag_sha tag tag_type
   release="$(gh api "repos/$SOURCE_REPOSITORY/releases/tags/$VERSION")" || die "Front release $VERSION was not found"
   jq -e --arg version "$VERSION" --arg id "$RELEASE_ID" --arg published_at "$PUBLISHED_AT" '
     .tag_name == $version and (.id | tostring) == $id and .draft == false and .prerelease == false and .published_at == $published_at
   ' <<<"$release" >/dev/null || die "Front release details do not match the dispatch payload"
   ref="$(gh api "repos/$SOURCE_REPOSITORY/git/ref/tags/$VERSION")" || die "Front tag $VERSION was not found"
   tag_sha="$(jq -r '.object.sha // empty' <<<"$ref")"
+  tag_type="$(jq -r '.object.type // empty' <<<"$ref")"
   [ -n "$tag_sha" ] || die "Front tag $VERSION has no object SHA"
-  tag="$(gh api "repos/$SOURCE_REPOSITORY/git/tags/$tag_sha")" || die "Front tag $VERSION must be an annotated tag"
-  jq -e '.object.type == "commit" and (.object.sha | test("^[0-9a-f]{40}$"))' <<<"$tag" >/dev/null || die "Front tag $VERSION does not resolve to a commit"
-  jq -r '.object.sha' <<<"$tag"
+  case "$tag_type" in
+    commit)
+      [[ "$tag_sha" =~ ^[0-9a-f]{40}$ ]] || die "Front lightweight tag $VERSION does not resolve to a commit"
+      printf '%s\n' "$tag_sha"
+      ;;
+    tag)
+      tag="$(gh api "repos/$SOURCE_REPOSITORY/git/tags/$tag_sha")" || die "Front annotated tag $VERSION could not be read"
+      jq -e '.object.type == "commit" and (.object.sha | test("^[0-9a-f]{40}$"))' <<<"$tag" >/dev/null || die "Front annotated tag $VERSION does not resolve to a commit"
+      jq -r '.object.sha' <<<"$tag"
+      ;;
+    *) die "Front tag $VERSION has an unsupported object type" ;;
+  esac
 }
 
 validate_source_run() {
