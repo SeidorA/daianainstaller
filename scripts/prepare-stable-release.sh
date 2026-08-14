@@ -70,8 +70,8 @@ update_default_pins() {
   for index in "${!SERVICE_NAMES[@]}"; do
     service="${SERVICE_NAMES[$index]}"
     image="${IMAGE_NAMES[$index]}"
-    perl -0pi -e "s{(^  \Q$service\E:\n    image: \Q$NAMESPACE/$image\E:)v[0-9]+\\.[0-9]+\\.[0-9]+$}{\$1$VERSION}m" "$temporary_file"
-    grep -Fxq "    image: $NAMESPACE/$image:$VERSION" "$temporary_file" || die "Unable to update the $service default pin"
+    perl -0pi -e "s{(^[ \t]*\Q$service\E:\n[ \t]*image: \Q$NAMESPACE/$image\E:)v[0-9]+\\.[0-9]+\\.[0-9]+$}{\$1$VERSION}m" "$temporary_file"
+    grep -Eq "^[[:space:]]*image: $NAMESPACE/$image:$VERSION$" "$temporary_file" || die "Unable to update the $service default pin"
   done
   mv "$temporary_file" "$compose_file"
 }
