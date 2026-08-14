@@ -953,7 +953,7 @@ proxy_host_payload() {
       caching_enabled: false,
       allow_websocket_upgrade: true,
       access_list_id: 0,
-      advanced_config: (if $adv == "" then null else $adv end),
+      advanced_config: $adv,
       enabled: true,
       locations: []
     }'
@@ -1497,7 +1497,8 @@ proxy_host_mutable_payload() {
         certificate_id, ssl_forced, hsts_enabled, hsts_subdomains,
         trust_forwarded_proto, http2_support, block_exploits,
         caching_enabled, allow_websocket_upgrade, access_list_id,
-        advanced_config, enabled, locations
+        advanced_config: (if .advanced_config == null then "" else .advanced_config end),
+        enabled, locations
       }
   ' <<<"$state"
 }

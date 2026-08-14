@@ -65,7 +65,7 @@ The main Daiana app version applies to these images together:
 The prompt accepts versions with or without the leading `v`:
 
 ```text
-Target Daiana app version [v2.4.0]: 2.4.1
+Target Daiana app version [v2.4.1]: 2.4.1
 ```
 
 The installer deploys that as `v2.4.1`.

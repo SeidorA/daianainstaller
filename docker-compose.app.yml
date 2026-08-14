@@ -1,6 +1,6 @@
 services:
   daiananext:
-    image: cloudseidoranalytics/daiana:v2.4.0
+    image: cloudseidoranalytics/daiana:v2.4.1
     container_name: daiana-next
     restart: unless-stopped
     volumes:
@@ -11,15 +11,18 @@ services:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       PRIVATE_CHAT_PYTHON_ORIGIN: ${BACKEND_BASE_URL}
+      NEXT_PUBLIC_API_STUDIO_BASE_URL: ${STUDIO_BASE_URL}
+      NEXT_PUBLIC_WEBUI_URL: ${WEBUI_BASE_URL}
       WEBUI_PUBLIC_URL: ${WEBUI_BASE_URL}
       WEBUI_AUTH_HANDOFF_SECRET: ${WEBUI_AUTH_HANDOFF_SECRET:-}
+      WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN: ${WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN:-false}
       PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN: ${PRIVATE_CHAT_ALLOW_INSECURE_LOCAL_ORIGIN:-false}
     depends_on:
       daianapython:
         condition: service_healthy
 
   daianapython:
-    image: cloudseidoranalytics/daianapython:v2.4.0
+    image: cloudseidoranalytics/daianapython:v2.4.1
     container_name: daiana-python
     restart: unless-stopped
     working_dir: /app
@@ -71,7 +74,7 @@ services:
       start_period: 30s
 
   daianavanna:
-    image: cloudseidoranalytics/daianavanna:v2.4.0
+    image: cloudseidoranalytics/daianavanna:v2.4.1
     container_name: daiana-vanna
     restart: unless-stopped
     working_dir: /app
@@ -100,7 +103,7 @@ services:
         condition: service_healthy
 
   daianamsteams:
-    image: cloudseidoranalytics/daianamsteams:v2.4.0
+    image: cloudseidoranalytics/daianamsteams:v2.4.1
     container_name: daiana-msteams
     restart: unless-stopped
     environment:
@@ -114,7 +117,7 @@ services:
 
   daianawhatsapp:
      container_name: daiana-whatsapp
-     image: cloudseidoranalytics/daianawhatsapp:v2.4.0
+     image: cloudseidoranalytics/daianawhatsapp:v2.4.1
      restart: unless-stopped
      environment:
       PYTHONUNBUFFERED: 1

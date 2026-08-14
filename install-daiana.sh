@@ -578,6 +578,7 @@ seed_supabase_env
 
 BASE_DOMAIN="${BASE_DOMAIN:-}"
 NPM_ADMIN_EMAIL="${NPM_ADMIN_EMAIL:-}"
+DAIANA_LOCAL_INSTALL="${DAIANA_LOCAL_INSTALL:-0}"
 secret_init_xtrace_was_enabled=0
 case "$-" in *x*) secret_init_xtrace_was_enabled=1; set +x ;; esac
 NPM_ADMIN_PASS="${NPM_ADMIN_PASS:-}"
@@ -618,6 +619,40 @@ prompt_secret() {
     printf '%s' "$reply"
   )
 }
+
+detect_local_ipv4() {
+  local interface="" address=""
+
+  case "$(uname -s 2>/dev/null || true)" in
+    Darwin*)
+      interface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+      [ -n "$interface" ] && address="$(ipconfig getifaddr "$interface" 2>/dev/null || true)"
+      ;;
+    Linux*)
+      address="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')"
+      ;;
+  esac
+
+  case "$address" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) printf '%s' "$address" ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "$DAIANA_LOCAL_INSTALL" = "1" ]; then
+  local_ipv4="$(detect_local_ipv4 || true)"
+  [ -n "$local_ipv4" ] || die "Could not detect a private IPv4 address for local installation"
+  BASE_DOMAIN="${local_ipv4}.nip.io"
+  WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN="true"
+  export BASE_DOMAIN WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN
+  if [ "$DRY_RUN" != "1" ]; then
+    persist_env_value BASE_DOMAIN "$BASE_DOMAIN"
+  fi
+  for public_var in STUDIO_BASE_URL SUPABASE_PUBLIC_URL API_EXTERNAL_URL SITE_URL WEBUI_BASE_URL BACKEND_BASE_URL WS_BASE_URL MS_BASE_URL VANNA_BASE_URL QDRANT_BASE_URL CORS_ALLOW_ORIGIN NEXT_PUBLIC_APP_URL; do
+    unset "$public_var"
+  done
+  log "Local installation detected; using BASE_DOMAIN=$BASE_DOMAIN"
+fi
 
 if [ -z "$BASE_DOMAIN" ] && [ ! -t 0 ]; then
   die "BASE_DOMAIN is required. Run in an interactive terminal or export BASE_DOMAIN=your.domain before launching."
@@ -913,6 +948,7 @@ if [ "$DRY_RUN" != "1" ]; then
   persist_secret_xtrace_was_enabled=0
   case "$-" in *x*) persist_secret_xtrace_was_enabled=1; set +x ;; esac
   persist_env_value BASE_DOMAIN "$BASE_DOMAIN"
+  [ -n "${WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN:-}" ] && persist_env_value WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN "$WEBUI_ALLOW_INSECURE_LOCAL_ORIGIN"
   persist_env_value NPM_ADMIN_EMAIL "$NPM_ADMIN_EMAIL"
   persist_env_value NPM_ADMIN_PASS "$NPM_ADMIN_PASS"
   persist_env_value PORTAINER_ADMIN_USER "$PORTAINER_ADMIN_USER"
@@ -1904,6 +1940,9 @@ ensure_flowise_storage_permissions() {
     fi
   fi
   if [ "$ACTION" = "install" ]; then
+    if [ "${DAIANA_LOCAL_INSTALL:-0}" = "1" ] && [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && [ -w "$flowise_logs_dir" ]; then
+      return
+    fi
     if [ "$(id -u)" -eq 0 ]; then
       chown -R "$desired_owner" "$flowise_root"
     elif command -v sudo >/dev/null 2>&1; then

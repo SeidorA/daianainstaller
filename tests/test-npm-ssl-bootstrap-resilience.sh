@@ -33,6 +33,19 @@ bash() {
   fi
   return "$child_status"
 }
+
+# NPM 2.15.1 normalizes an empty advanced_config from null to an empty string.
+# Emit and compare the canonical empty representation to keep readback checks stable.
+PATH="$MOCK_BIN:$PATH" \
+  bash -c '
+    source "$1"
+    payload="$(proxy_host_payload nginx nginx.example.test npm 81 0)"
+    jq -e '\''type == "object" and .advanced_config == ""'\'' <<<"$payload" >/dev/null
+    init_proxy_rollback
+    expected='\''{"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":0,"ssl_forced":false,"hsts_enabled":false,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":false,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}'\''
+    actual="${expected/null/\"\"}"
+    same_proxy_host_state "$expected" "$actual"
+  ' _ "$SCRIPT"
 printf 'mock certificate\n' > "$TMP_DIR/local-nginx.crt"
 printf 'mock private key\n' > "$TMP_DIR/local-nginx.key"
 
