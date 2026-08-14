@@ -16,9 +16,10 @@ for field in schema_version source_repo stable_release_tag release_id source_run
   grep -Fq "client_payload.$field" "$workflow" || fail "workflow does not extract $field"
 done
 grep -Fq 'ref: main' "$workflow" || fail "workflow does not prepare from main"
+grep -Fq 'GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}' "$workflow" || fail "release validation does not authenticate GitHub CLI"
 grep -Fq "git push origin \"HEAD:refs/heads/\${branch}\"" "$workflow" || fail "workflow branch push contract changed"
 grep -Fq "GH_TOKEN=\"\$GITHUB_TOKEN\" gh pr create" "$workflow" || fail "PR creation does not use GITHUB_TOKEN"
-grep -Fq "gh pr edit \"\$pr_url\" --add-label type:feature" "$workflow" || fail "PR type label is missing"
+grep -Fq "gh pr edit \"\$pr_url\" --add-label type:chore" "$workflow" || fail "PR type label is missing"
 grep -Fq "git diff --quiet -- docker-compose.app.yml \"releases/\${VERSION}.json\" && exit 0" "$workflow" || fail "no-diff handling is unsafe"
 grep -Fq "git ls-remote --exit-code --heads origin \"\$branch\"" "$workflow" || fail "orphan branch protection is missing"
 grep -Fq "gh pr list --repo SeidorA/daianainstaller --base main --head \"\$branch\" --state open" "$workflow" || fail "open PR idempotency is missing"
