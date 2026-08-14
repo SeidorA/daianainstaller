@@ -102,6 +102,14 @@ Rules:
 
 ## Digest-bound deployment bundles
 
+### Stable-release automation credentials
+
+The `Prepare stable release update` workflow uses `FRONT_RELEASE_READ_TOKEN` only to read
+release, tag, and workflow-run metadata from the Front repository. Configure it as a
+fine-grained token restricted to Front with read-only Contents and Actions permissions.
+The workflow uses its own `GITHUB_TOKEN` only to create a review branch and pull request
+in Installer; it never deploys an environment.
+
 The installer accepts an explicitly selected JSON deployment bundle without changing any default image pin:
 
 ```bash

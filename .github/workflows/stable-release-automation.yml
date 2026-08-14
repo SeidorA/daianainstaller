@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0
       - name: Validate and prepare release files
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.FRONT_RELEASE_READ_TOKEN }}
         run: scripts/prepare-stable-release.sh "$DISPATCH_SCHEMA_VERSION" "$SOURCE_REPOSITORY" "$VERSION" "$RELEASE_ID" "$SOURCE_RUN_ID" "$PUBLISHED_AT"
       - name: Create review branch and pull request
         env:
