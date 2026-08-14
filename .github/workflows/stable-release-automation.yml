@@ -58,7 +58,7 @@ jobs:
           branch="automation/stable-${VERSION}"
           existing_pr="$(GH_TOKEN="$GITHUB_TOKEN" gh pr list --repo SeidorA/daianainstaller --base main --head "$branch" --state open --json url --jq '.[0].url')"
           [ -z "$existing_pr" ] || exit 0
-          git diff --quiet -- docker-compose.app.yml "releases/${VERSION}.json" && exit 0
+          [ -z "$(git status --porcelain -- docker-compose.app.yml "releases/${VERSION}.json")" ] && exit 0
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             printf 'Remote branch %s exists without an open pull request; refusing to overwrite it.\n' "$branch" >&2
             exit 1

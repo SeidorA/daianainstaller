@@ -25,7 +25,7 @@ grep -Fq 'DAIANA_REGISTRY_PULL_TOKEN: ${{ secrets.DAIANA_REGISTRY_PULL_TOKEN }}'
 grep -Fq "git push origin \"HEAD:refs/heads/\${branch}\"" "$workflow" || fail "workflow branch push contract changed"
 grep -Fq "GH_TOKEN=\"\$GITHUB_TOKEN\" gh pr create" "$workflow" || fail "PR creation does not use GITHUB_TOKEN"
 grep -Fq "gh pr edit \"\$pr_url\" --add-label type:chore" "$workflow" || fail "PR type label is missing"
-grep -Fq "git diff --quiet -- docker-compose.app.yml \"releases/\${VERSION}.json\" && exit 0" "$workflow" || fail "no-diff handling is unsafe"
+grep -Fq "git status --porcelain -- docker-compose.app.yml \"releases/\${VERSION}.json\"" "$workflow" || fail "no-change handling ignores untracked release bundles"
 grep -Fq "git ls-remote --exit-code --heads origin \"\$branch\"" "$workflow" || fail "orphan branch protection is missing"
 grep -Fq "gh pr list --repo SeidorA/daianainstaller --base main --head \"\$branch\" --state open" "$workflow" || fail "open PR idempotency is missing"
 if grep -Eq 'git push origin (main|HEAD:main)|deployment:' "$workflow"; then fail "workflow can push main or deploy"; fi
