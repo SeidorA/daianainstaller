@@ -18,10 +18,12 @@ digest_a="sha256:$(printf 'a%.0s' {1..64})"
 digest_b="sha256:$(printf 'b%.0s' {1..64})"
 digest_c="sha256:$(printf 'c%.0s' {1..64})"
 digest_d="sha256:$(printf 'd%.0s' {1..64})"
+digest_e="sha256:$(printf 'e%.0s' {1..64})"
 commit_a="$(printf '1%.0s' {1..40})"
 commit_b="$(printf '2%.0s' {1..40})"
 commit_c="$(printf '3%.0s' {1..40})"
 commit_d="$(printf '4%.0s' {1..40})"
+commit_e="$(printf '5%.0s' {1..40})"
 
 for reference in 'repo/app:v1' "registry.example.com:5000/team/app@$digest_a" "repo/app:v1@$digest_a"; do
   validate_oci_reference "$reference" || fail "valid OCI reference rejected: $reference"
@@ -80,6 +82,38 @@ write_deployment_bundle_override "$override"
 [[ "$(jq '.services | length' "$override")" -eq 4 ]] || fail "QA override is not exactly four services"
 [[ "$(jq -r '.services.daianamsteams.image' "$override")" = "registry.example.com/msteams@$digest_c" ]] || fail "Teams reference changed"
 pass "four-image QA bundle includes digest-bound Teams provenance"
+
+stable_bundle="$TMP_DIR/stable-bundle.json"
+invalid="$TMP_DIR/invalid.json"
+jq -n \
+  --arg next "registry.example.com/next@$digest_a" \
+  --arg python "registry.example.com/python@$digest_b" \
+  --arg vanna "registry.example.com/vanna@$digest_c" \
+  --arg msteams "registry.example.com/msteams@$digest_d" \
+  --arg whatsapp "registry.example.com/whatsapp@$digest_e" \
+  --arg da "$digest_a" --arg db "$digest_b" --arg dc "$digest_c" --arg dd "$digest_d" --arg de "$digest_e" \
+  --arg ca "$commit_a" --arg cb "$commit_b" --arg cc "$commit_c" --arg cd "$commit_d" --arg ce "$commit_e" \
+  '{schema_version:3,deployment_mode:"complete-stack-replacement",images:{
+    next:{reference:$next,index_digest:$da,source_commit:$ca},
+    python:{reference:$python,index_digest:$db,source_commit:$cb},
+    vanna:{reference:$vanna,index_digest:$dc,source_commit:$cc},
+    msteams:{reference:$msteams,index_digest:$dd,source_commit:$cd},
+    whatsapp:{reference:$whatsapp,index_digest:$de,source_commit:$ce}}}' > "$stable_bundle"
+load_deployment_bundle "$stable_bundle" || fail "valid schema-v3 stable bundle rejected"
+[[ -z "$BUNDLE_STUDIO_IMAGE" ]] || fail "schema-v3 bundle unexpectedly selected Studio"
+write_deployment_bundle_override "$override"
+[[ "$(jq '.services | length' "$override")" -eq 5 ]] || fail "schema-v3 override is not exactly five services"
+[[ "$(jq -r '.services.daianavanna.image' "$override")" = "registry.example.com/vanna@$digest_c" ]] || fail "Vanna reference changed"
+[[ "$(jq -r '.services.daianawhatsapp.image' "$override")" = "registry.example.com/whatsapp@$digest_e" ]] || fail "WhatsApp reference changed"
+docker_cmd() { PULL_LOG="${PULL_LOG}${2}\n"; }
+PULL_LOG=""
+prepull_deployment_bundle_images || fail "complete schema-v3 pre-pull failed"
+[[ "$(printf '%b' "$PULL_LOG" | wc -l | tr -d ' ')" -eq 5 ]] || fail "not all five schema-v3 images were pulled"
+for filter in 'del(.images.vanna)' '.images.whatsapp.reference = "registry.example.com/whatsapp:v1"' '.images.extra = .images.next'; do
+  jq "$filter" "$stable_bundle" > "$invalid"
+  if validate_deployment_bundle "$(<"$invalid")"; then fail "invalid schema-v3 bundle accepted: $filter"; fi
+done
+pass "schema-v3 stable bundles are complete, digest-bound, and omit Studio"
 
 assert_checked_in_bundle() {
   local name="$1" file="$2" expected_hash="$3"
@@ -235,6 +269,12 @@ preserved_image="$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FIL
 [[ "$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daiananext)" = "" ]] || fail "candidate service was overwritten by preservation override"
 [[ "$(jq -r '.services.daiananext.image' "$qa_override")" = "registry.example.com/next@$digest_a" ]] || fail "candidate override lost digest-bound image"
 pass "schema-v2 bundles preserve omitted services without replacing digest-bound candidates"
+
+rm -f "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE"
+BUNDLE_ACTIVE=1 BUNDLE_SCHEMA_VERSION=3 LAST_UPDATE_SNAPSHOT_DIR="$snapshot_dir" APP_DEPLOY_COMPOSE_FILES=(base.json "$qa_override") preserve_bundle_services_from_snapshot
+[[ "$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daianastudio)" = candidate/studio@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ]] || fail "Studio image was not preserved for schema-v3"
+[[ "$(compose_service_image "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE" daianavanna)" = "" ]] || fail "schema-v3 candidate service was overwritten by preservation override"
+pass "schema-v3 bundles preserve independently versioned services"
 
 rm -f "$BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE"
 missing_snapshot_dir="$TMP_DIR/missing-snapshot"

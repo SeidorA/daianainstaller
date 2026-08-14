@@ -1,0 +1,69 @@
+name: Prepare stable release update
+
+on:
+  repository_dispatch:
+    types: [daiananext_stable_release]
+  workflow_dispatch:
+    inputs:
+      stable_release_tag:
+        description: Published Front stable version (vX.Y.Z)
+        required: true
+        type: string
+      release_id:
+        description: Published Front release ID
+        required: true
+        type: string
+      source_run_id:
+        description: Successful Front source workflow run ID
+        required: true
+        type: string
+      published_at:
+        description: Published Front timestamp (UTC RFC3339 seconds)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.client_payload.source_repo == 'SeidorA/Daiana'
+    runs-on: ubuntu-latest
+    env:
+      DISPATCH_SCHEMA_VERSION: ${{ github.event_name == 'workflow_dispatch' && '1' || github.event.client_payload.schema_version }}
+      SOURCE_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && 'SeidorA/Daiana' || github.event.client_payload.source_repo }}
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.stable_release_tag || github.event.client_payload.stable_release_tag }}
+      RELEASE_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.release_id || github.event.client_payload.release_id }}
+      SOURCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.source_run_id || github.event.client_payload.source_run_id }}
+      PUBLISHED_AT: ${{ github.event_name == 'workflow_dispatch' && inputs.published_at || github.event.client_payload.published_at }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Validate and prepare release files
+        run: scripts/prepare-stable-release.sh "$DISPATCH_SCHEMA_VERSION" "$SOURCE_REPOSITORY" "$VERSION" "$RELEASE_ID" "$SOURCE_RUN_ID" "$PUBLISHED_AT"
+      - name: Create review branch and pull request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch="automation/stable-${VERSION}"
+          existing_pr="$(GH_TOKEN="$GITHUB_TOKEN" gh pr list --repo SeidorA/daianainstaller --base main --head "$branch" --state open --json url --jq '.[0].url')"
+          [ -z "$existing_pr" ] || exit 0
+          git diff --quiet -- docker-compose.app.yml "releases/${VERSION}.json" && exit 0
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            printf 'Remote branch %s exists without an open pull request; refusing to overwrite it.\n' "$branch" >&2
+            exit 1
+          fi
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docker-compose.app.yml "releases/${VERSION}.json"
+          git commit -m "chore(release): prepare ${VERSION} installer pins"
+          git push origin "HEAD:refs/heads/${branch}"
+          pr_url="$(GH_TOKEN="$GITHUB_TOKEN" gh pr create --repo SeidorA/daianainstaller --base main --head "$branch" --title "chore(release): prepare ${VERSION} installer pins" --body $'Closes #29\n\n- Validates the published Front stable release and five multiarch OCI indexes.\n- Updates five default pins and adds a schema-v3 digest-bound bundle.\n- No deployment is performed by this workflow.')"
+          GH_TOKEN="$GITHUB_TOKEN" gh pr edit "$pr_url" --add-label type:chore

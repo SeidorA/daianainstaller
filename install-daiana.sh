@@ -1094,10 +1094,13 @@ prepare_update_app_compose_files() {
 
 preserve_bundle_services_from_snapshot() {
   [ "${BUNDLE_ACTIVE:-0}" = "1" ] || return 0
-  [ "${BUNDLE_SCHEMA_VERSION:-}" = "2" ] || return 0
-
   local snapshot_compose preserved_override service image
-  local -a preserved_services=(daianavanna daianawhatsapp daianawebui daianaqdrant)
+  local -a preserved_services
+  case "${BUNDLE_SCHEMA_VERSION:-}" in
+    2) preserved_services=(daianavanna daianawhatsapp daianawebui daianaqdrant) ;;
+    3) preserved_services=(daianastudio daianawebui daianaqdrant) ;;
+    *) return 0 ;;
+  esac
   local -a override_args=()
   snapshot_compose="$LAST_UPDATE_SNAPSHOT_DIR/docker-compose.before.yml"
   [ -s "$snapshot_compose" ] || die "Cannot preserve bundle services: missing exact update snapshot compose"

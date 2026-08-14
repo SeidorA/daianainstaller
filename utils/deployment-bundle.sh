@@ -28,14 +28,16 @@ validate_deployment_bundle() {
   case "$schema_version" in
     1) components=(next python studio) ;;
     2) components=(next python msteams studio) ;;
+    3) components=(next python vanna msteams whatsapp) ;;
     *) die "Unsupported deployment bundle schema version: $schema_version"; return 1 ;;
   esac
   jq -e '. as $bundle |
-    (.schema_version == 1 or .schema_version == 2) and
+    (.schema_version == 1 or .schema_version == 2 or .schema_version == 3) and
     .deployment_mode == "complete-stack-replacement" and
     ((.schema_version == 1 and (.images | type == "object" and keys == ["next", "python", "studio"])) or
-     (.schema_version == 2 and (.images | type == "object" and keys == ["msteams", "next", "python", "studio"]))) and
-    ((if .schema_version == 1 then ["next", "python", "studio"] else ["next", "python", "msteams", "studio"] end) | all(. as $name |
+     (.schema_version == 2 and (.images | type == "object" and keys == ["msteams", "next", "python", "studio"])) or
+      (.schema_version == 3 and (.images | type == "object" and keys == ["msteams", "next", "python", "vanna", "whatsapp"]))) and
+    ((if .schema_version == 1 then ["next", "python", "studio"] elif .schema_version == 2 then ["next", "python", "msteams", "studio"] else ["next", "python", "vanna", "msteams", "whatsapp"] end) | all(. as $name |
       ($bundle.images[$name] | type == "object") and
       ($bundle.images[$name] | keys == ["index_digest", "reference", "source_commit"]) and
       ($bundle.images[$name].reference | type == "string") and
@@ -71,19 +73,27 @@ load_deployment_bundle() {
   schema_version="$(jq -r '.schema_version' <<<"$BUNDLE_DOCUMENT")"
   # shellcheck disable=SC2034 # consumed by the sourcing installer
   BUNDLE_SCHEMA_VERSION="$schema_version"
-  IFS=$'\t' read -r BUNDLE_NEXT_IMAGE BUNDLE_PYTHON_IMAGE BUNDLE_MSTEAMS_IMAGE BUNDLE_STUDIO_IMAGE < <(
-    jq -r 'if .schema_version == 2
-      then [.images.next.reference, .images.python.reference, .images.msteams.reference, .images.studio.reference]
-      else [.images.next.reference, .images.python.reference, "__legacy_no_msteams__", .images.studio.reference]
+  IFS=$'\t' read -r BUNDLE_NEXT_IMAGE BUNDLE_PYTHON_IMAGE BUNDLE_VANNA_IMAGE BUNDLE_MSTEAMS_IMAGE BUNDLE_WHATSAPP_IMAGE BUNDLE_STUDIO_IMAGE < <(
+    jq -r 'if .schema_version == 3
+      then [.images.next.reference, .images.python.reference, .images.vanna.reference, .images.msteams.reference, .images.whatsapp.reference, "__legacy_no_studio__"]
+      elif .schema_version == 2
+      then [.images.next.reference, .images.python.reference, "__legacy_no_vanna__", .images.msteams.reference, "__legacy_no_whatsapp__", .images.studio.reference]
+      else [.images.next.reference, .images.python.reference, "__legacy_no_vanna__", "__legacy_no_msteams__", "__legacy_no_whatsapp__", .images.studio.reference]
       end | @tsv' <<<"$BUNDLE_DOCUMENT"
   )
+  [ "$BUNDLE_VANNA_IMAGE" = "__legacy_no_vanna__" ] && BUNDLE_VANNA_IMAGE=""
   [ "$BUNDLE_MSTEAMS_IMAGE" = "__legacy_no_msteams__" ] && BUNDLE_MSTEAMS_IMAGE=""
+  [ "$BUNDLE_WHATSAPP_IMAGE" = "__legacy_no_whatsapp__" ] && BUNDLE_WHATSAPP_IMAGE=""
+  [ "$BUNDLE_STUDIO_IMAGE" = "__legacy_no_studio__" ] && BUNDLE_STUDIO_IMAGE=""
   BUNDLE_SHA256="$(deployment_bundle_sha256 "$BUNDLE_DOCUMENT")"
 }
 
 write_deployment_bundle_override() {
   local output_file="$1"
-  if [ -n "${BUNDLE_MSTEAMS_IMAGE:-}" ]; then
+  if [ "${BUNDLE_SCHEMA_VERSION:-}" = 3 ]; then
+    jq -n --arg next "$BUNDLE_NEXT_IMAGE" --arg python "$BUNDLE_PYTHON_IMAGE" --arg vanna "$BUNDLE_VANNA_IMAGE" --arg msteams "$BUNDLE_MSTEAMS_IMAGE" --arg whatsapp "$BUNDLE_WHATSAPP_IMAGE" \
+      '{services:{daiananext:{image:$next},daianapython:{image:$python},daianavanna:{image:$vanna},daianamsteams:{image:$msteams},daianawhatsapp:{image:$whatsapp}}}' > "$output_file"
+  elif [ -n "${BUNDLE_MSTEAMS_IMAGE:-}" ]; then
     jq -n --arg next "$BUNDLE_NEXT_IMAGE" --arg python "$BUNDLE_PYTHON_IMAGE" --arg msteams "$BUNDLE_MSTEAMS_IMAGE" --arg studio "$BUNDLE_STUDIO_IMAGE" \
       '{services:{daiananext:{image:$next},daianapython:{image:$python},daianamsteams:{image:$msteams},daianastudio:{image:$studio}}}' > "$output_file"
   else
@@ -110,7 +120,7 @@ read_snapshot_env() {
 
 prepull_deployment_bundle_images() {
   local image
-  for image in "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_NEXT_IMAGE" "${BUNDLE_MSTEAMS_IMAGE:-}" "$BUNDLE_STUDIO_IMAGE"; do
+  for image in "$BUNDLE_PYTHON_IMAGE" "$BUNDLE_NEXT_IMAGE" "${BUNDLE_VANNA_IMAGE:-}" "${BUNDLE_MSTEAMS_IMAGE:-}" "${BUNDLE_WHATSAPP_IMAGE:-}" "${BUNDLE_STUDIO_IMAGE:-}"; do
     [ -n "$image" ] || continue
     docker_cmd pull "$image" || { die "Failed to pre-pull deployment bundle image: $image"; return 1; }
   done

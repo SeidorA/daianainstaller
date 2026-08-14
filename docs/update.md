@@ -109,7 +109,7 @@ DAIANA_DEPLOYMENT_BUNDLE=/secure/releases/daiana-bundle.json \
 bash update-daiana.sh
 ```
 
-The compatibility contract accepts version 1 bundles with exactly three image records under `images`: `next`, `python`, and `studio`. The remote-QA contract uses version 2 with exactly four records: `next`, `python`, `msteams`, and `studio`. Both use `deployment_mode: "complete-stack-replacement"`. Every image record must contain:
+The compatibility contract accepts version 1 bundles with exactly three image records under `images`: `next`, `python`, and `studio`. The remote-QA contract uses version 2 with exactly four records: `next`, `python`, `msteams`, and `studio`. Stable application release bundles use version 3 with exactly five records: `next`, `python`, `vanna`, `msteams`, and `whatsapp`; Studio remains independently versioned. All schemas use `deployment_mode: "complete-stack-replacement"`. Every image record must contain:
 
 | Field | Contract |
 |---|---|
@@ -118,6 +118,10 @@ The compatibility contract accepts version 1 bundles with exactly three image re
 | `source_commit` | 40-character lowercase hexadecimal source commit SHA |
 
 The bundle is read once, then the same captured bytes are validated, hashed, and converted to a literal JSON Compose override. Missing or extra records, mutable-only references, invalid provenance, digest mismatches, and unknown schema versions fail closed. There is no tag fallback or partial application.
+
+## Stable release automation
+
+`.github/workflows/stable-release-automation.yml` accepts the `daiananext_stable_release` repository dispatch only from `SeidorA/Daiana`, or a manual `workflow_dispatch` bootstrap. The dispatch contract is schema version 1 with exactly these values: `source_repo`, `stable_release_tag`, `release_id`, `source_run_id`, and `published_at`. The script validates their shapes, compares the release ID/tag/published timestamp against GitHub independently, requires a successful source run, then derives the Front commit from an annotated stable release tag. It independently fetches each of the five Docker Hub OCI indexes and requires Linux `amd64` and `arm64` descriptors. The script accepts the index digest only from the registry `Docker-Content-Digest` response header, never from a payload field. It exits cleanly when an open automation PR or no changes already exist, and refuses to overwrite an orphaned remote automation branch. It creates a review branch and PR with `GITHUB_TOKEN`; it never pushes to `main` or deploys an environment.
 
 After all existing preconditions complete, the installer applies pending database migrations first and then pre-pulls every image in the selected bundle. Any pull failure stops before Portainer. A successful operation submits one complete Portainer stack replacement containing all literal references; it does not perform or claim a sequential per-service rollout.
 
