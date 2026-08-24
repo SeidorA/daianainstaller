@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SQL_DIR="$ROOT_DIR/sql"
+LOCK_SQL='SELECT pg_advisory_xact_lock(1480867157, 1296651378);'
+OPERATIONS=(
+  20260717120000_add_shared_message_quota.sql
+  20260725170000_upgrade_shared_message_quota_replay.sql
+  20260727130000_add_history_message_refs.sql
+  20260727140000_allow_authorized_private_message_quota.sql
+  20260731120000_add_flowise_quota_finalization.sql
+  20260814150000_support_manual_studio_schema.sql
+)
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+psql_safe() { command psql -X -v ON_ERROR_STOP=1 "$@"; }
+
+verify_manifest() {
+  [ -f "$ROOT_DIR/MANIFEST.sha256" ] || die 'MANIFEST.sha256 is missing'
+  while read -r expected path; do
+    [ -n "${expected:-}" ] || continue
+    [ -n "${path:-}" ] || die 'invalid MANIFEST.sha256 entry'
+    case "$path" in sql/*.sql|README.md|bin/dmo-manual-compat) ;; *) die 'unsafe MANIFEST.sha256 path' ;; esac
+    [ -f "$ROOT_DIR/$path" ] || die "manifest file is missing: $path"
+    [ "$(sha256 "$ROOT_DIR/$path")" = "$expected" ] || die "manifest verification failed: $path"
+  done < "$ROOT_DIR/MANIFEST.sha256"
+}
+
+state_query() {
+  psql_safe -qAt -F ' ' -c "
+SELECT CASE
+ WHEN to_regclass('public.tenant_studio_organization_mappings') IS NULL
+  AND to_regclass('public.tenant_studio_workspace_mappings') IS NULL
+  AND to_regclass('public.tenant_message_quota_periods') IS NULL
+  AND to_regclass('public.tenant_message_quota_reservations') IS NULL THEN 0
+ WHEN to_regprocedure('public.reserve_tenant_message_quota(integer,text,text,timestamptz)') IS NOT NULL
+  AND to_regclass('public.tenant_message_quota_periods') IS NOT NULL THEN 1
+ ELSE -1 END,
+ CASE WHEN to_regprocedure('public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)') IS NULL
+       AND to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NULL THEN 0
+      WHEN to_regprocedure('public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)') IS NOT NULL
+       AND to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NOT NULL THEN 1 ELSE -1 END,
+ CASE WHEN to_regclass('public.figure_artifacts') IS NULL
+       AND NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.history'::regclass AND attname = 'message_ref' AND NOT attisdropped) THEN 0
+      WHEN to_regclass('public.figure_artifacts') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.history'::regclass AND attname = 'message_ref' AND NOT attisdropped) THEN 1 ELSE -1 END,
+ CASE WHEN to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NULL THEN 0
+      WHEN (SELECT prosrc LIKE '%a.botpublic IS TRUE%' FROM pg_proc WHERE oid = to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)')) THEN 0 ELSE 1 END,
+ CASE WHEN to_regprocedure('public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)') IS NULL THEN 0
+      WHEN has_function_privilege('service_role', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE') THEN 1 ELSE -1 END,
+ CASE WHEN to_regprocedure('public.list_studio_mapping_catalog()') IS NULL THEN 0
+      WHEN has_function_privilege('service_role', 'public.list_studio_mapping_catalog()', 'EXECUTE') THEN 1 ELSE -1 END;" | tr '\n' ' '
+}
+
+assert_ordered_state() {
+  local states=() value index=0 seen_absent=0
+  read -r -a states <<< "$(state_query)"
+  [ "${#states[@]}" -eq 6 ] || die 'could not classify manual compatibility state'
+  for value in "${states[@]}"; do
+    [ "$value" != '-1' ] || die 'partial or unknown manual compatibility footprint; run verify and reconcile before any DDL'
+    if [ "$value" = 0 ]; then seen_absent=1; fi
+    if [ "$value" = 1 ] && [ "$seen_absent" = 1 ]; then
+      die 'mixed manual compatibility footprint; refusing before any DDL'
+    fi
+    index=$((index + 1))
+  done
+  printf '%s\n' "${states[*]}"
+}
+
+fingerprint_webui() {
+  psql_safe -qAt -c "SELECT md5(coalesce(string_agg(x, E'\\n' ORDER BY x), '')) FROM (SELECT c.relkind::text || ':' || n.nspname || '.' || c.relname || ':' || coalesce(pg_get_userbyid(c.relowner), '') AS x FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='daianawebui' UNION ALL SELECT 'column:' || n.nspname || '.' || c.relname || '.' || a.attname || ':' || a.atttypid::regtype::text FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='daianawebui' AND a.attnum>0 AND NOT a.attisdropped) s;"
+}
+
+preflight() {
+  verify_manifest
+  psql_safe -q -v ON_ERROR_STOP=1 -f "$SQL_DIR/preflight.sql" >/dev/null
+  assert_ordered_state >/dev/null
+  fingerprint_webui | grep -Eq '^[0-9a-f]{32}$' || die 'anomalous WebUI catalog fingerprint'
+  printf 'PASS: preflight is safe to plan or apply\n'
+}
+
+plan() {
+  preflight
+  local states=() i
+  read -r -a states <<< "$(assert_ordered_state)"
+  for i in "${!OPERATIONS[@]}"; do
+    if [ "${states[$i]}" = 1 ]; then printf 'SKIP %s\n' "${OPERATIONS[$i]}"; else printf 'APPLY %s\n' "${OPERATIONS[$i]}"; fi
+  done
+}
+
+apply() {
+  local backup_file='' backup_sha='' before after states=() i
+  while [ "$#" -gt 0 ]; do
+    case "$1" in --backup-file) backup_file="${2:-}"; shift 2;; --backup-sha256) backup_sha="${2:-}"; shift 2;; *) die "unknown apply argument: $1";; esac
+  done
+  [ -n "$backup_file" ] && [ -f "$backup_file" ] || die 'apply requires an operator-provided --backup-file'
+  [[ "$backup_sha" =~ ^[0-9a-fA-F]{64}$ ]] || die 'apply requires a SHA-256 --backup-sha256'
+  backup_sha="$(printf '%s' "$backup_sha" | tr 'A-F' 'a-f')"
+  [ "$(sha256 "$backup_file")" = "$backup_sha" ] || die 'backup SHA-256 does not match; no database connection was made'
+  preflight
+  before="$(fingerprint_webui)"
+  read -r -a states <<< "$(assert_ordered_state)"
+  for i in "${!OPERATIONS[@]}"; do
+    [ "${states[$i]}" = 1 ] && continue
+    psql_safe -q -v ON_ERROR_STOP=1 -c "BEGIN; $LOCK_SQL" -f "$SQL_DIR/${OPERATIONS[$i]}" -c 'COMMIT;' || {
+      printf 'UNKNOWN: session loss or failed operation; do not retry automatically; run verify\n' >&2
+      return 1
+    }
+    read -r -a states <<< "$(assert_ordered_state)"
+  done
+  after="$(fingerprint_webui)"
+  [ "$before" = "$after" ] || die 'WebUI metadata changed; run verify and investigate'
+  verify
+}
+
+verify() {
+  verify_manifest
+  psql_safe -q -v ON_ERROR_STOP=1 -f "$SQL_DIR/verify.sql" >/dev/null
+  [ "$(assert_ordered_state)" = '1 1 1 1 1 1' ] || die 'verification found an incomplete or mixed manual compatibility state'
+  printf 'PASS: verified six DMO manual compatibility operations\n'
+}
+
+case "${1:-}" in
+  preflight) [ "$#" -eq 1 ] || die 'preflight accepts no arguments'; preflight ;;
+  plan) [ "$#" -eq 1 ] || die 'plan accepts no arguments'; plan ;;
+  apply) shift; apply "$@" ;;
+  verify) [ "$#" -eq 1 ] || die 'verify accepts no arguments'; verify ;;
+  *) die 'usage: dmo-manual-compat preflight|plan|apply --backup-file FILE --backup-sha256 SHA256|verify' ;;
+esac
