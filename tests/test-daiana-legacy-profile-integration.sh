@@ -14,6 +14,7 @@ docker exec "$container" pg_isready -U postgres >/dev/null 2>&1 || { printf 'FAI
 
 docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN; CREATE ROLE studio NOLOGIN;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated;
 CREATE SCHEMA private AUTHORIZATION postgres;
 CREATE TABLE public.tenants ("idTenant" integer PRIMARY KEY, settings jsonb);
 CREATE TABLE public.tenant_plans (id integer PRIMARY KEY, "idTenant" integer NOT NULL, "planName" text NOT NULL, "maxMessages" integer, "studioIntegrated" boolean, "periodStartAt" timestamptz NOT NULL, "expiresAt" timestamptz, "validatedAt" timestamptz, status text NOT NULL, "createdAt" timestamptz, "updatedAt" timestamptz);
@@ -53,7 +54,7 @@ SELECT to_regnamespace('daianastudio') IS NOT NULL AND to_regnamespace('studio')
 SELECT to_regnamespace('daianawebui') IS NOT NULL AND to_regclass('daianawebui.webui_marker') IS NOT NULL;
 SELECT count(*) = 0 FROM public.tenant_studio_organization_mappings;
 SELECT count(*) = 0 FROM public.tenant_studio_workspace_mappings;
-SELECT count(*) = 6 FROM private.daiana_legacy_daianastudio_schema_migrations;
+SELECT count(*) = 7 FROM private.daiana_legacy_daianastudio_schema_migrations;
 SELECT NOT EXISTS (SELECT 1 FROM private.daiana_legacy_daianastudio_schema_migrations WHERE version = '20260805120000');
 SELECT settings = '{}'::jsonb FROM public.tenants WHERE \"idTenant\" = 1;
 SELECT to_regclass('public.profile_switch_ddl') IS NULL;
@@ -62,6 +63,15 @@ SELECT count(*) = 1
    AND min(\"organizationId\") = '11111111-1111-1111-1111-111111111111'
    AND min(\"workspaceId\") = '22222222-2222-2222-2222-222222222222'
 FROM public.list_studio_mapping_catalog();
-SELECT count(*) = 1 FROM public.history WHERE message_ref IS NOT NULL;")"
-[ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 11 ] || { printf 'FAIL: legacy profile assertions failed: %s\n' "$result" >&2; exit 1; }
+SELECT count(*) = 1 FROM public.history WHERE message_ref IS NOT NULL;
+SELECT has_function_privilege('service_role', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('anon', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE');
+SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('anon', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
+SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('anon', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE')
+   AND NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE');")"
+[ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 14 ] || { printf 'FAIL: legacy profile assertions failed: %s\n' "$result" >&2; exit 1; }
 printf 'PASS: PostgreSQL 15 synthetic legacy profile preserves schemas/WebUI state, skips runtime secrets, and rejects profile switches before DDL\n'

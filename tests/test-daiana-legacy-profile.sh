@@ -15,6 +15,7 @@ printf 'SELECT 1;\n' > "$TMP_DIR/migrations/20260717120000_add_shared_message_qu
 printf 'SELECT 4;\n' > "$TMP_DIR/migrations/20260805120000_backfill_tenant_secrets.sql"
 printf 'SELECT 2;\n' > "$TMP_DIR/migrations/20260812100000_add_studio_mapping_catalog.sql"
 printf 'SELECT 3;\n' > "$TMP_DIR/migrations/20260814150000_support_manual_studio_schema.sql"
+printf 'SELECT 5;\n' > "$TMP_DIR/migrations/20260824160000_harden_replay_quota_rpc_acl.sql"
 
 export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres
 export DAIANA_MIGRATIONS_DIR="$TMP_DIR/migrations"
@@ -35,7 +36,7 @@ DAIANA_MIGRATION_PROFILE=legacy-daianastudio run_daiana_migrations
 legacy_sql="$(command cat "$CAPTURED_SQL")"
 [[ "$legacy_sql" != *'SELECT 2;'* ]] || fail "legacy profile included static studio catalog migration"
 [[ "$legacy_sql" != *'SELECT 4;'* ]] || fail "legacy profile included tenant secret backfill"
-[[ "$legacy_sql" == *'SELECT 1;'* && "$legacy_sql" == *'SELECT 3;'* ]] || fail "legacy profile omitted required quota or schema-aware catalog migration"
+[[ "$legacy_sql" == *'SELECT 1;'* && "$legacy_sql" == *'SELECT 3;'* && "$legacy_sql" == *'SELECT 5;'* ]] || fail "legacy profile omitted required quota, catalog, or ACL correction migration"
 [[ "$legacy_sql" == *'private.daiana_legacy_daianastudio_schema_migrations'* ]] || fail "legacy ledger is not isolated"
 [[ "$legacy_sql" == *'private.daiana_installer_schema_migrations'*'refusing legacy-daianastudio before DDL'* ]] || fail "legacy profile interlock contract is missing"
 [[ "$legacy_sql" == *'daiana_manual_mixed_footprint'*'do not run either profile'* ]] || fail "manual mixed-state interlock contract is missing"
