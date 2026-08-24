@@ -43,6 +43,7 @@ sql="$(command cat "$CAPTURED_SQL")"
 [[ "$sql" == *'BEGIN;'* ]] || fail "transaction begin missing"
 [[ "$sql" == *'COMMIT;'* ]] || fail "transaction commit missing"
 [[ "$sql" == *'pg_advisory_xact_lock(1480867157, 1296651378)'* ]] || fail "global advisory lock missing"
+[[ "$sql" == *'daiana_manual_mixed_footprint'*'refusing standard before DDL'*'do not run either profile'* ]] || fail "manual mixed-state interlock contract is missing"
 [[ "$sql" == *'daiana_installer_schema_migrations'* ]] || fail "history table missing"
 [[ "$sql" == *'checksum drift for version'* ]] || fail "checksum drift guard missing"
 [[ "$sql" == *'\if :daiana_exact_applied'* ]] || fail "exact checksum skip missing"
@@ -116,7 +117,7 @@ if ACTION=update APP_STACK_NAME=daiana NPM_STACK_NAME=npm APP_STACK_ENV_JSON='[]
     UPDATE_MARKER="$UPDATE_MARKER" LIFECYCLE="$LIFECYCLE" bash -c '
       set -e
       log() { :; }; die() { return 1; }; wait_for_supabase_ready() { return 0; }
-      portainer_upsert_stack() { [ "$1" != "$APP_STACK_NAME" ] || : > "$UPDATE_MARKER"; }
+      portainer_upsert_stack_from_vars() { [ "$1" != "$APP_STACK_NAME" ] || : > "$UPDATE_MARKER"; }
       run_daiana_migrations() { return 23; }
       source "$LIFECYCLE"
     '; then

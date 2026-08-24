@@ -2,6 +2,37 @@
 
 DAIANA_MIGRATIONS_DIR="${DAIANA_MIGRATIONS_DIR:-volumes/db/daiana-migrations}"
 DAIANA_DB_CONTAINER="${DAIANA_DB_CONTAINER:-supabase-db}"
+DAIANA_MIGRATION_PROFILE="${DAIANA_MIGRATION_PROFILE:-standard}"
+DAIANA_MIGRATION_LEDGER="${DAIANA_MIGRATION_LEDGER:-private.daiana_installer_schema_migrations}"
+
+daiana_migration_effective_file() {
+  local file="$1" output="$2"
+
+  case "$DAIANA_MIGRATION_PROFILE:${file##*/}" in
+    standard:*) DAIANA_MIGRATION_EFFECTIVE_FILE="$file" ;;
+    legacy-daianastudio:20260717120000_add_shared_message_quota.sql)
+      # The standard package provisions its seeded Studio mapping from the
+      # canonical schema. Legacy installs must only accept explicit mappings.
+      awk '
+        /^CREATE OR REPLACE FUNCTION private\.provision_known_studio_mapping\(\)/ { skip = 1 }
+        !skip { print }
+        skip && /^SELECT private\.provision_known_studio_mapping\(\);$/ { skip = 0 }
+      ' "$file" > "$output"
+      DAIANA_MIGRATION_EFFECTIVE_FILE="$output"
+      ;;
+    legacy-daianastudio:20260812100000_add_studio_mapping_catalog.sql)
+      # A later standard migration supplies the schema-aware catalog RPC.
+      DAIANA_MIGRATION_EFFECTIVE_FILE=""
+      ;;
+    legacy-daianastudio:20260805120000_backfill_tenant_secrets.sql)
+      # Runtime tenant secret provisioning requires separate approval and is
+      # not part of the legacy schema-compatibility migration set.
+      DAIANA_MIGRATION_EFFECTIVE_FILE=""
+      ;;
+    legacy-daianastudio:*) DAIANA_MIGRATION_EFFECTIVE_FILE="$file" ;;
+    *) die "Unknown Daiana migration profile: $DAIANA_MIGRATION_PROFILE" ;;
+  esac
+}
 
 daiana_migration_sha256() {
   local file="$1"
@@ -31,7 +62,7 @@ daiana_migration_metadata() {
 
 run_daiana_migrations() {
   local dry_run="${1:-0}"
-  local installer_version migration_sql file metadata version name checksum base rc
+  local installer_version migration_sql file effective_file effective_dir metadata version name checksum base rc opposite_ledger interlock_error
   local migration_count=0 output_file outcome_file result_file_owned=0
   local LC_ALL=C
   export LC_ALL
@@ -39,6 +70,16 @@ run_daiana_migrations() {
   export DAIANA_MIGRATION_OUTCOME
 
   [ -d "$DAIANA_MIGRATIONS_DIR" ] || die "Daiana migrations directory is missing: $DAIANA_MIGRATIONS_DIR"
+  case "$DAIANA_MIGRATION_PROFILE" in
+    standard)
+      opposite_ledger=private.daiana_legacy_daianastudio_schema_migrations
+      ;;
+    legacy-daianastudio)
+      [ "$DAIANA_MIGRATION_LEDGER" = private.daiana_installer_schema_migrations ] && DAIANA_MIGRATION_LEDGER=private.daiana_legacy_daianastudio_schema_migrations
+      opposite_ledger=private.daiana_installer_schema_migrations
+      ;;
+    *) die "Unknown Daiana migration profile: $DAIANA_MIGRATION_PROFILE" ;;
+  esac
   installer_version="$(tr -d '[:space:]' < VERSION)"
   [ -n "$installer_version" ] || die "VERSION is empty"
   case "$installer_version" in *[!A-Za-z0-9._-]*) die "VERSION contains unsafe characters" ;; esac
@@ -47,8 +88,13 @@ run_daiana_migrations() {
     log "Dry-run: ordered Daiana migrations from $DAIANA_MIGRATIONS_DIR"
     for file in "$DAIANA_MIGRATIONS_DIR"/*.sql; do
       [ -e "$file" ] || continue
+      effective_dir="$(mktemp -d "${TMPDIR:-/tmp}/daiana-migration-profile.XXXXXX")"
+      daiana_migration_effective_file "$file" "$effective_dir/${file##*/}"
+      effective_file="$DAIANA_MIGRATION_EFFECTIVE_FILE"
+      [ -n "$effective_file" ] || continue
       metadata="$(daiana_migration_metadata "$file")"
-      checksum="$(daiana_migration_sha256 "$file")"
+      checksum="$(daiana_migration_sha256 "$effective_file")"
+      rm -rf "$effective_dir"
       log "Would verify/apply ${file##*/} (version=${metadata%%|*}, sha256=$checksum)"
       migration_count=$((migration_count + 1))
     done
@@ -70,45 +116,93 @@ run_daiana_migrations() {
   fi
   printf 'outcome=unknown\nstatus=125\n' > "$outcome_file"
   if (
-  migration_sql="$(mktemp "${TMPDIR:-/tmp}/daiana-migrations.XXXXXX")"
-  trap 'rm -f "$migration_sql"' EXIT
+    migration_sql="$(mktemp "${TMPDIR:-/tmp}/daiana-migrations.XXXXXX")"
+    effective_dir="$(mktemp -d "${TMPDIR:-/tmp}/daiana-migration-profile.XXXXXX")"
+    trap 'rm -f "${migration_sql:-}"; rm -rf "${effective_dir:-}"' EXIT
   {
     printf '%s\n' '\set ON_ERROR_STOP on'
     printf '%s\n' 'BEGIN;'
     printf '%s\n' "SELECT pg_advisory_xact_lock(1480867157, 1296651378);"
+    # A known mixed manual update must be reconciled into a validated ledger,
+    # not guessed by either schema profile.
+    printf '%s\n' "SELECT to_regnamespace('daianastudio') IS NOT NULL"
+    printf '%s\n' "   AND to_regnamespace('daianawebui') IS NOT NULL"
+    printf '%s\n' "   AND to_regclass('public.tenant_studio_organization_mappings') IS NOT NULL"
+    printf '%s\n' "   AND to_regclass('public.tenant_studio_workspace_mappings') IS NOT NULL"
+    printf '%s\n' "   AND to_regclass('public.tenant_message_quota_periods') IS NOT NULL"
+    printf '%s\n' "   AND to_regclass('public.tenant_message_quota_reservations') IS NOT NULL"
+    printf '%s\n' "   AND to_regprocedure('private.provision_known_studio_mapping()') IS NOT NULL"
+    printf '%s\n' "   AND NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('public.history') AND attname = 'message_ref' AND NOT attisdropped)"
+    printf '%s\n' "   AND to_regclass('public.figure_artifacts') IS NULL AS daiana_manual_mixed_footprint \\gset"
+    printf '%s\n' "SELECT to_regclass('private.daiana_installer_schema_migrations') IS NOT NULL AS daiana_standard_ledger_exists, to_regclass('private.daiana_legacy_daianastudio_schema_migrations') IS NOT NULL AS daiana_legacy_ledger_exists \\gset"
+    printf '%s\n' '\if :daiana_standard_ledger_exists'
+    printf '%s\n' 'SELECT EXISTS (SELECT 1 FROM private.daiana_installer_schema_migrations) AS daiana_standard_profile_applied \gset'
+    printf '%s\n' '\else'
+    printf '%s\n' '\set daiana_standard_profile_applied false'
+    printf '%s\n' '\endif'
+    printf '%s\n' '\if :daiana_legacy_ledger_exists'
+    printf '%s\n' 'SELECT EXISTS (SELECT 1 FROM private.daiana_legacy_daianastudio_schema_migrations) AS daiana_legacy_profile_applied \gset'
+    printf '%s\n' '\else'
+    printf '%s\n' '\set daiana_legacy_profile_applied false'
+    printf '%s\n' '\endif'
+    printf '%s\n' '\if :daiana_manual_mixed_footprint'
+    printf '%s\n' '\if :daiana_standard_profile_applied'
+    printf '%s\n' '\else'
+    printf '%s\n' '\if :daiana_legacy_profile_applied'
+    printf '%s\n' '\else'
+    # shellcheck disable=SC2016 # Literal PostgreSQL dollar-quote sentinel.
+    printf "DO %s BEGIN RAISE EXCEPTION 'Daiana migration manual-state interlock: detected a partial managed migration footprint without an applied standard or legacy ledger; refusing %s before DDL. Remediation: do not run either profile; reconcile and validate the migration ledger or use an approved recovery plan.'; END %s;\n" \
+      '$daiana_manual_state_interlock$' "$DAIANA_MIGRATION_PROFILE" '$daiana_manual_state_interlock$'
+    printf '%s\n' '\endif'
+    printf '%s\n' '\endif'
+    printf '%s\n' '\endif'
+    # Check while holding the migration lock so concurrent profile starts
+    # cannot both pass an empty-ledger preflight.
+    printf "SELECT to_regclass('%s') IS NOT NULL AS daiana_opposite_ledger_exists \\gset\n" "$opposite_ledger"
+    printf '%s\n' '\if :daiana_opposite_ledger_exists'
+    printf "SELECT EXISTS (SELECT 1 FROM %s) AS daiana_opposite_profile_applied \\gset\n" "$opposite_ledger"
+    printf '%s\n' '\if :daiana_opposite_profile_applied'
+    # shellcheck disable=SC2016 # Literal PostgreSQL dollar-quote sentinel.
+    printf "DO %s BEGIN RAISE EXCEPTION 'Daiana migration profile interlock: %s already has applied migrations; refusing %s before DDL'; END %s;\n" \
+      '$daiana_profile_interlock$' "$opposite_ledger" "$DAIANA_MIGRATION_PROFILE" '$daiana_profile_interlock$'
+    printf '%s\n' '\endif'
+    printf '%s\n' '\endif'
     printf '%s\n' 'CREATE SCHEMA IF NOT EXISTS private AUTHORIZATION postgres;'
     printf '%s\n' 'REVOKE ALL ON SCHEMA private FROM PUBLIC;'
-    printf '%s\n' 'CREATE TABLE IF NOT EXISTS private.daiana_installer_schema_migrations ('
+    printf 'CREATE TABLE IF NOT EXISTS %s (\n' "$DAIANA_MIGRATION_LEDGER"
     printf '%s\n' '  version text PRIMARY KEY,'
     printf '%s\n' '  name text NOT NULL,'
     printf '%s\n' '  checksum character(64) NOT NULL,'
     printf '%s\n' '  applied_at timestamptz NOT NULL DEFAULT now(),'
     printf '%s\n' '  installer_version text NOT NULL'
     printf '%s\n' ');'
-    printf '%s\n' 'ALTER TABLE private.daiana_installer_schema_migrations OWNER TO postgres;'
-    printf '%s\n' 'REVOKE ALL ON private.daiana_installer_schema_migrations FROM PUBLIC, anon, authenticated, service_role;'
+    printf 'ALTER TABLE %s OWNER TO postgres;\n' "$DAIANA_MIGRATION_LEDGER"
+    printf 'REVOKE ALL ON %s FROM PUBLIC, anon, authenticated, service_role;\n' "$DAIANA_MIGRATION_LEDGER"
 
     for file in "$DAIANA_MIGRATIONS_DIR"/*.sql; do
       [ -e "$file" ] || continue
+      daiana_migration_effective_file "$file" "$effective_dir/${file##*/}"
+      effective_file="$DAIANA_MIGRATION_EFFECTIVE_FILE"
+      [ -n "$effective_file" ] || continue
       metadata="$(daiana_migration_metadata "$file")"
       version="${metadata%%|*}"
       name="${metadata#*|}"
-      checksum="$(daiana_migration_sha256 "$file")"
+      checksum="$(daiana_migration_sha256 "$effective_file")"
       base="${file##*/}"
       migration_count=$((migration_count + 1))
 
-      printf "SELECT EXISTS (SELECT 1 FROM private.daiana_installer_schema_migrations WHERE version = '%s' AND checksum = '%s') AS daiana_exact_applied \\gset\n" "$version" "$checksum"
+      printf "SELECT EXISTS (SELECT 1 FROM %s WHERE version = '%s' AND checksum = '%s') AS daiana_exact_applied \\gset\n" "$DAIANA_MIGRATION_LEDGER" "$version" "$checksum"
       printf '%s\n' '\if :daiana_exact_applied'
       printf '\\echo SKIP %s (version=%s, checksum verified)\n' "$base" "$version"
       printf '%s\n' '\else'
       # shellcheck disable=SC2016
-      printf "DO %s BEGIN IF EXISTS (SELECT 1 FROM private.daiana_installer_schema_migrations WHERE version = '%s') THEN RAISE EXCEPTION 'Daiana migration checksum drift for version %s' USING DETAIL = 'Packaged checksum: %s'; END IF; END %s;\n" \
-        '$daiana_checksum$' "$version" "$version" "$checksum" '$daiana_checksum$'
+      printf "DO %s BEGIN IF EXISTS (SELECT 1 FROM %s WHERE version = '%s') THEN RAISE EXCEPTION 'Daiana migration checksum drift for version %s' USING DETAIL = 'Packaged checksum: %s'; END IF; END %s;\n" \
+        '$daiana_checksum$' "$DAIANA_MIGRATION_LEDGER" "$version" "$version" "$checksum" '$daiana_checksum$'
       printf '\\echo APPLY %s (version=%s, sha256=%s)\n' "$base" "$version" "$checksum"
       printf '%s\n' '-- installer migration file begins'
-      command cat "$file"
+      command cat "$effective_file"
       printf '%s\n' '-- installer migration file ends'
-      printf "INSERT INTO private.daiana_installer_schema_migrations (version, name, checksum, installer_version) VALUES ('%s', '%s', '%s', '%s');\n" "$version" "$name" "$checksum" "$installer_version"
+      printf "INSERT INTO %s (version, name, checksum, installer_version) VALUES ('%s', '%s', '%s', '%s');\n" "$DAIANA_MIGRATION_LEDGER" "$version" "$name" "$checksum" "$installer_version"
       printf '\\echo APPLIED %s\n' "$base"
       printf '%s\n' '\endif'
     done
@@ -157,6 +251,8 @@ run_daiana_migrations() {
       DAIANA_MIGRATION_OUTCOME=unknown
     fi
     printf 'outcome=%s\nstatus=%s\n' "$DAIANA_MIGRATION_OUTCOME" "$rc" > "$outcome_file"
+    interlock_error="$(grep -m 1 -E 'Daiana migration (profile|manual-state) interlock:' "$output_file" || true)"
+    [ -z "$interlock_error" ] || log "$interlock_error"
     rm -f "$output_file" "$migration_sql"
     exit "$rc"
   fi

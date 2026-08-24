@@ -83,9 +83,16 @@ SQL
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260805120000_backfill_tenant_secrets.sql" "$migration_dir/"
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260717120000_add_shared_message_quota.sql" "$migration_dir/"
 
-  export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container"
+  export POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container" DAIANA_MIGRATION_PROFILE=standard
   export DAIANA_MIGRATIONS_DIR="$migration_dir"
   run_daiana_migrations
+  switch_dir="$work_dir/profile-switch"
+  mkdir -p "$switch_dir"
+  printf 'CREATE TABLE public.profile_switch_ddl(id integer);\n' > "$switch_dir/20260901000000_profile_switch_ddl.sql"
+  if switch_error="$(POSTGRES_PASSWORD=test-password POSTGRES_DB=postgres DAIANA_DB_CONTAINER="$container" DAIANA_MIGRATIONS_DIR="$switch_dir" DAIANA_MIGRATION_PROFILE=legacy-daianastudio DAIANA_MIGRATION_LEDGER=private.daiana_installer_schema_migrations run_daiana_migrations 2>&1)"; then
+    die "PostgreSQL $pg_version legacy profile was accepted after standard migrations"
+  fi
+  [[ "$switch_error" == *'profile interlock'*'refusing legacy-daianastudio before DDL'* ]] || die "PostgreSQL $pg_version standard-to-legacy interlock error was unclear: $switch_error"
   docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -Atqc \
     "SELECT public.reserve_tenant_message_quota(1, 'pre-replay', 'integration')->>'status'; SELECT public.release_tenant_message_quota(1, 'pre-replay', 'integration');" >/dev/null
   cp "$ROOT_DIR/volumes/db/daiana-migrations/20260725170000_upgrade_shared_message_quota_replay.sql" "$migration_dir/"
@@ -104,6 +111,11 @@ SQL
 
   result="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "
     SELECT count(*) = 3 FROM private.daiana_installer_schema_migrations;
+    SELECT EXISTS (SELECT 1 FROM private.daiana_installer_schema_migrations WHERE version = '20260805120000');
+    SELECT settings ? 'secretSeed' AND settings ? 'teamsSecret' FROM public.tenants WHERE \"idTenant\" = 1;
+    SELECT to_regclass('public.profile_switch_ddl') IS NULL;
+    SELECT to_regclass('private.daiana_legacy_daianastudio_schema_migrations') IS NULL;
+    SELECT to_regnamespace('studio') IS NOT NULL AND to_regnamespace('daianastudio') IS NULL;
     SELECT checksum = 'a006dd4648b127b2cd2629f1a60364d759c729c9469a2978deb754ae6837c689' FROM private.daiana_installer_schema_migrations WHERE version = '20260717120000';
     SELECT checksum = 'ad89ebdecb3a138be57fcc0535bb73a7569468c7cb518188f4709e1894f1f528' FROM private.daiana_installer_schema_migrations WHERE version = '20260725170000';
     SELECT result->>'legacy' = 'true' FROM public.tenant_message_quota_reservations WHERE \"requestId\" = 'pre-replay' AND source = 'integration';
@@ -125,7 +137,7 @@ SQL
     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;
     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
-  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 22 ] || die "PostgreSQL $pg_version historical/replay/checksum/object/RPC/privilege checks failed: $result"
+  [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 27 ] || die "PostgreSQL $pg_version standard-profile/replay/checksum/object/RPC/privilege checks failed: $result"
 
   docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 DO $$
@@ -371,7 +383,7 @@ SQL
   table_exists="$(docker exec -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -Atqc "SELECT to_regclass('public.must_rollback') IS NOT NULL;")"
   [ "$recorded" = 0 ] && [ "$table_exists" = f ] || die "PostgreSQL $pg_version failed migration was not atomic"
 
-  printf 'PASS: PostgreSQL %s apply/replay/drift/failure/quota/finalize/privilege/RPC checks\n' "$pg_version"
+  printf 'PASS: PostgreSQL %s standard-profile/apply/replay/drift/failure/quota/finalize/privilege/RPC checks\n' "$pg_version"
   cleanup
   trap - EXIT INT TERM
 done
