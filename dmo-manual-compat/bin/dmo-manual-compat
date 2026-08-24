@@ -11,6 +11,7 @@ OPERATIONS=(
   20260727140000_allow_authorized_private_message_quota.sql
   20260731120000_add_flowise_quota_finalization.sql
   20260814150000_support_manual_studio_schema.sql
+  20260824160000_harden_replay_quota_rpc_acl.sql
 )
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -49,15 +50,28 @@ SELECT CASE
  CASE WHEN to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NULL THEN 0
       WHEN (SELECT prosrc LIKE '%a.botpublic IS TRUE%' FROM pg_proc WHERE oid = to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)')) THEN 0 ELSE 1 END,
  CASE WHEN to_regprocedure('public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)') IS NULL THEN 0
-      WHEN has_function_privilege('service_role', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE') THEN 1 ELSE -1 END,
+       ELSE 1 END,
  CASE WHEN to_regprocedure('public.list_studio_mapping_catalog()') IS NULL THEN 0
-      WHEN has_function_privilege('service_role', 'public.list_studio_mapping_catalog()', 'EXECUTE') THEN 1 ELSE -1 END;" | tr '\n' ' '
+       WHEN has_function_privilege('service_role', 'public.list_studio_mapping_catalog()', 'EXECUTE') THEN 1 ELSE -1 END,
+ CASE WHEN to_regprocedure('public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)') IS NULL
+        OR to_regprocedure('public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)') IS NULL
+        OR to_regprocedure('public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)') IS NULL THEN 0
+       WHEN has_function_privilege('service_role', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('anon', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('authenticated', 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)', 'EXECUTE')
+        AND has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('anon', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE')
+        AND has_function_privilege('service_role', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('anon', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE')
+        AND NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_without_history(text,text,jsonb,timestamptz)', 'EXECUTE') THEN 1
+       ELSE 0 END;" | tr '\n' ' '
 }
 
 assert_ordered_state() {
   local states=() value index=0 seen_absent=0
   read -r -a states <<< "$(state_query)"
-  [ "${#states[@]}" -eq 6 ] || die 'could not classify manual compatibility state'
+  [ "${#states[@]}" -eq 7 ] || die 'could not classify manual compatibility state'
   for value in "${states[@]}"; do
     [ "$value" != '-1' ] || die 'partial or unknown manual compatibility footprint; run verify and reconcile before any DDL'
     if [ "$value" = 0 ]; then seen_absent=1; fi
@@ -118,8 +132,8 @@ apply() {
 verify() {
   verify_manifest
   psql_safe -q -v ON_ERROR_STOP=1 -f "$SQL_DIR/verify.sql" >/dev/null
-  [ "$(assert_ordered_state)" = '1 1 1 1 1 1' ] || die 'verification found an incomplete or mixed manual compatibility state'
-  printf 'PASS: verified six DMO manual compatibility operations\n'
+  [ "$(assert_ordered_state)" = '1 1 1 1 1 1 1' ] || die 'verification found an incomplete or mixed manual compatibility state'
+  printf 'PASS: verified seven DMO manual compatibility operations\n'
 }
 
 case "${1:-}" in

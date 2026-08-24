@@ -9,6 +9,33 @@ docker info >/dev/null 2>&1 || { printf 'SKIP: Docker daemon is unavailable\n'; 
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
+assert_forbidden_rpc_execution() {
+  local role="$1" sql="$2" error
+  if error="$(psql -X -v ON_ERROR_STOP=1 -c "SET ROLE $role; $sql" 2>&1)"; then
+    fail "$role executed a service-role-only quota RPC"
+  fi
+  [[ "$error" == *'permission denied for function'* ]] || fail "$role RPC denial was unclear: $error"
+}
+
+assert_quota_rpc_acl() {
+  local role
+  for role in anon authenticated; do
+    assert_forbidden_rpc_execution "$role" "SELECT public.reserve_tenant_message_quota(NULL::integer, 'acl-legacy', 'acl-test', now());"
+    assert_forbidden_rpc_execution "$role" "SELECT public.reserve_tenant_message_quota(NULL::integer, 'acl-replay', '1', '1', repeat('a', 64), 'acl-test', now());"
+    assert_forbidden_rpc_execution "$role" "SELECT public.finalize_tenant_message_quota_turn('missing', 'acl-test', '[]'::jsonb, now());"
+    assert_forbidden_rpc_execution "$role" "SELECT public.finalize_tenant_message_quota_turn('missing', 'acl-test', '[]'::jsonb, '{}'::jsonb, now());"
+    assert_forbidden_rpc_execution "$role" "SELECT public.finalize_tenant_message_quota_without_history('missing', 'acl-test', '{}'::jsonb, now());"
+  done
+  psql -X -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+SET ROLE service_role;
+SELECT public.reserve_tenant_message_quota(NULL::integer, 'acl-legacy', 'acl-test', now());
+SELECT public.reserve_tenant_message_quota(NULL::integer, 'acl-replay', '1', '1', repeat('a', 64), 'acl-test', now());
+SELECT public.finalize_tenant_message_quota_turn('missing', 'acl-test', '[]'::jsonb, now());
+SELECT public.finalize_tenant_message_quota_turn('missing', 'acl-test', '[]'::jsonb, '{}'::jsonb, now());
+SELECT public.finalize_tenant_message_quota_without_history('missing', 'acl-test', '{}'::jsonb, now());
+SQL
+}
+
 for version in $VERSIONS; do
   case "$version" in 15|17) ;; *) fail "unsupported PostgreSQL version: $version" ;; esac
   for studio_schema in studio daianastudio; do
@@ -21,6 +48,7 @@ for version in $VERSIONS; do
     docker exec "$container" pg_isready -U postgres >/dev/null 2>&1 || fail "PostgreSQL $version did not start"
     docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
 CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN; CREATE ROLE studio_owner NOLOGIN;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated;
 CREATE SCHEMA private; CREATE SCHEMA daianawebui AUTHORIZATION studio_owner; CREATE TABLE daianawebui.marker (id integer PRIMARY KEY);
 CREATE SCHEMA $studio_schema AUTHORIZATION studio_owner;
 CREATE TABLE $studio_schema.organization (id uuid PRIMARY KEY, name text NOT NULL);
@@ -42,7 +70,29 @@ SQL
     [ "$(psql -X -qAt -c "SELECT to_regclass('public.figure_artifacts') IS NULL")" = t ] || fail 'partial footprint reached later DDL'
     psql -X -q -c 'DROP TABLE public.tenant_message_quota_periods'
     "$PACKAGE/bin/dmo-manual-compat" apply --backup-file "$backup" --backup-sha256 "$backup_hash"
-    "$PACKAGE/bin/dmo-manual-compat" plan | grep -c '^SKIP ' | grep -qx 6 || fail 'rerun did not skip all six operations'
+    "$PACKAGE/bin/dmo-manual-compat" plan | grep -c '^SKIP ' | grep -qx 7 || fail 'rerun did not skip all seven operations'
+    assert_quota_rpc_acl
+
+    # Regression fixture: the original six operations are already present, but
+    # Supabase-style explicit API-role grants remain on the three newer RPCs.
+    psql -X -v ON_ERROR_STOP=1 -q -c 'REVOKE EXECUTE ON FUNCTION public.finalize_tenant_message_quota_without_history(text, text, jsonb, timestamptz) FROM service_role;'
+    if verify_error="$("$PACKAGE/bin/dmo-manual-compat" verify 2>&1)"; then fail 'missing service_role grant passed verification'; fi
+    [[ "$verify_error" == *'service_role cannot execute required quota RPC'* ]] || fail "missing service_role grant did not fail closed: $verify_error"
+    psql -X -v ON_ERROR_STOP=1 -q <<'SQL'
+GRANT EXECUTE ON FUNCTION public.reserve_tenant_message_quota(integer, text, text, text, text, text, timestamptz) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finalize_tenant_message_quota_turn(text, text, jsonb, jsonb, timestamptz) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finalize_tenant_message_quota_without_history(text, text, jsonb, timestamptz) TO anon, authenticated;
+SQL
+    if verify_error="$("$PACKAGE/bin/dmo-manual-compat" verify 2>&1)"; then fail 'bad replay RPC ACLs passed verification'; fi
+    [[ "$verify_error" == *'forbidden role can execute quota RPC'* ]] || fail "forbidden role grant did not fail closed: $verify_error"
+    repair_plan="$("$PACKAGE/bin/dmo-manual-compat" plan)"
+    [ "$(printf '%s\n' "$repair_plan" | grep -c '^SKIP ')" -eq 6 ] || fail 'ACL repair plan did not preserve the six-operation prefix'
+    [ "$(printf '%s\n' "$repair_plan" | grep -c '^APPLY 20260824160000_harden_replay_quota_rpc_acl.sql$')" -eq 1 ] || fail 'ACL repair plan omitted the corrective payload'
+    operation_fingerprint_before="$(psql -X -qAt -c "SELECT md5(concat_ws(':', 'public.tenant_message_quota_periods'::regclass::oid, 'public.tenant_message_quota_reservations'::regclass::oid, 'public.figure_artifacts'::regclass::oid, count(*), count(message_ref))) FROM public.history;")"
+    "$PACKAGE/bin/dmo-manual-compat" apply --backup-file "$backup" --backup-sha256 "$backup_hash"
+    operation_fingerprint_after="$(psql -X -qAt -c "SELECT md5(concat_ws(':', 'public.tenant_message_quota_periods'::regclass::oid, 'public.tenant_message_quota_reservations'::regclass::oid, 'public.figure_artifacts'::regclass::oid, count(*), count(message_ref))) FROM public.history;")"
+    [ "$operation_fingerprint_before" = "$operation_fingerprint_after" ] || fail 'ACL correction reran data or DDL operations'
+    assert_quota_rpc_acl
     after="$(psql -X -qAt -c "SELECT md5(string_agg(attname, ',' ORDER BY attname)) FROM pg_attribute WHERE attrelid = 'daianawebui.marker'::regclass AND attnum > 0")"
     [ "$before" = "$after" ] || fail 'WebUI changed'
     psql -X -qAt -c "SELECT count(*) = 0 FROM public.tenant_studio_organization_mappings; SELECT count(*) = 0 FROM public.tenant_studio_workspace_mappings; SELECT to_regprocedure('public.list_studio_mapping_catalog()') IS NOT NULL;" | grep -c '^t$' | grep -qx 3 || fail 'explicit mapping or catalog contract failed'
@@ -54,4 +104,4 @@ tamper_dir="$(mktemp -d)"; trap 'rm -rf "$tamper_dir"' EXIT
 cp -R "$PACKAGE" "$tamper_dir/package"
 printf '\n-- tampered\n' >> "$tamper_dir/package/sql/20260731120000_add_flowise_quota_finalization.sql"
 if "$tamper_dir/package/bin/dmo-manual-compat" preflight >/dev/null 2>&1; then fail 'tampered manifest was accepted'; fi
-printf 'PASS: DMO manual package validates synthetic PostgreSQL 15/17, both Studio variants, idempotency, WebUI immutability, and manifest tampering\n'
+printf 'PASS: DMO manual package validates PostgreSQL 15/17 ACL repair, overload execution, idempotency, Studio variants, WebUI immutability, and manifest tampering\n'
