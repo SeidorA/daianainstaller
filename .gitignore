@@ -17,6 +17,8 @@
 .private-chat-harness/manual-cleanup-required
 .private-chat-harness/active
 volumes/db/data/
+volumes/db/data.*/
+volumes/db/db/
 volumes/storage/stub/
 volumes/daiana/
 volumes/portainer/
