@@ -12,21 +12,23 @@ See per-service updates below for details. Only the most important changes relev
 
 ## Unreleased
 
-### Daiana installer 0.2.0
-- Added forward-only, checksum-tracked Daiana database migrations serialized by a PostgreSQL advisory lock.
-- Added migration gates after fresh-install seeds and before install/update app deployment.
-- Added the shared Studio/Daiana message quota migration, explicit default tenant mapping, hardened RPC privileges, and server-side Studio quota configuration.
-- Added the canonical replay migration for existing shared-message-quota reservations, preserving Installer-owned transaction and PostgREST reload boundaries.
-- Added disposable PostgreSQL 15/17 migration contract, replay, checksum drift, atomic failure, privilege, and RPC smoke tests.
-- Added strict, digest-bound three-service deployment bundles with immutable-reference validation, fail-closed pre-pulls, and complete stack overrides.
-- Added the official opt-in application `v2.2.0` bundle for Next and Python v2.2.0 with Studio v3.1.3; application bundle and Installer versions remain independent.
-- Preserved exact Portainer stack content and Env in rollback snapshots so rollback does not re-render placeholders from current values.
-- Updated the default Studio image to v3.1.3 while retaining the default Next and Python v2.1.9 Compose pins.
-- Included post-v0.1.0 corrections that clarify operator documentation, preserve rollback snapshots during `make wipe`, and reset license seed sequences dynamically.
+---
 
 ⚠️ **Upcoming changes:**
 - ⚠️ **Breaking change** (week of July 6, 2026): Access to the OpenAPI spec at `/rest/v1/` via the anon (publishable) key will be removed. Requests using the service role or new secret keys are unaffected, and data access via `/rest/v1/your_table` or any client library continues to work as it does today. See discussion [#42949](https://github.com/orgs/supabase/discussions/42949).
 - ⚠️ **Breaking change** (week of July 6, 2026): `API_EXTERNAL_URL` will be updated to include the `/auth/v1` path prefix (e.g. `http://localhost:8000/auth/v1`), aligning self-hosted with the platform and CLI. This makes custom OAuth providers work out of the box and moves SAML SSO endpoints to `/auth/v1/sso/saml/*`. See discussion [#47093](https://github.com/orgs/supabase/discussions/47093).
+
+## v0.3.0 - 2026-08-26
+
+### Daiana installer
+- Added candidate and complete-stack deployment bundles with immutable-reference validation and fail-closed deployment checks.
+- Hardened certificate and proxy-host lifecycle handling, deployment recovery, and rollback snapshots.
+- Added forward-only, checksum-tracked database migrations and the manual DMO compatibility package.
+- Added Studio mapping catalog support and legacy Daiana Studio profile and schema compatibility.
+- Improved local macOS installer behavior and TLS compatibility.
+- Added stable-release automation for release metadata and installer pin updates.
+- Fixed compatibility with NPM proxy response metadata.
+- Expanded integration, lifecycle, migration, bundle, macOS, and release-automation tests and updated operator documentation.
 
 Check the main Supabase [changelog](https://github.com/orgs/supabase/discussions/categories/changelog?discussions_q=is%3Aopen+category%3AChangelog+label%3Aself-hosted) for updates.
 

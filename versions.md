@@ -1,5 +1,9 @@
 # Docker Image Versions
 
+## 2026-08-26
+- Installer `v0.3.0` is independent from Daiana application image versions.
+- Release bundles present in this repository: `releases/v2.2.0.json`, `releases/v2.4.1.json`, `releases/prod-v2.4.0-studio-mapping.json`, `releases/qa-v2.3.0-studio-v3.1.3.json`, and `releases/shared-message-quota.json`.
+
 ## 2026-07-26
 - Default pin: cloudseidoranalytics/daianastudio:v3.1.3 (prev cloudseidoranalytics/daianastudio:v3.1.2)
 - Official opt-in application bundle `releases/v2.2.0.json`:
