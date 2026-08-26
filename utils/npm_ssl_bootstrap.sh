@@ -1004,6 +1004,7 @@ create_proxy_host() {
   # Keep the raw successful response available: jq must not prevent recovery
   # when NPM reports creation but returns malformed or incomplete JSON.
   if ! id="$(extract_create_response_id "$body")"; then
+    write_create_response_diagnostic "$body" "$sequence" || true
     # A valid JSON value that fails strict extraction is an invalid response,
     # not an inventory-recovery case. Recovery remains limited to genuinely
     # malformed bodies so nested, duplicate, array, null, and multi-value
@@ -1319,15 +1320,10 @@ def preserve_non_integer(token):
 def reject_constant(token):
     raise ValueError("non-JSON number")
 
-def reject_nested_ids(value, depth=0):
-    if isinstance(value, dict):
-        if depth > 0 and "id" in value:
-            raise ValueError("nested id key")
-        for child in value.values():
-            reject_nested_ids(child, depth + 1)
-    elif isinstance(value, list):
-        for child in value:
-            reject_nested_ids(child, depth + 1)
+def is_canonical_positive_decimal(token, maximum):
+    return (isinstance(token, str) and token and token[0] != "0"
+            and all("0" <= character <= "9" for character in token)
+            and int(token) <= maximum)
 
 text = sys.stdin.read()
 start = 0
@@ -1345,14 +1341,17 @@ try:
         raise ValueError("multiple JSON values or trailing data")
     if not isinstance(value, dict) or "id" not in value:
         raise ValueError("top-level object with id required")
-    reject_nested_ids(value)
     id_value = value["id"]
-    if (not isinstance(id_value, tuple) or len(id_value) != 2):
-        raise ValueError("id must be an integer")
-    kind, token = id_value
-    if (kind != "integer" or not token or token[0] == "0"
-            or any(character < "0" or character > "9" for character in token)
-            or int(token) <= 0 or int(token) > int(os.environ["MAX_SAFE_POSITIVE_INTEGER_ID"])):
+    maximum = int(os.environ["MAX_SAFE_POSITIVE_INTEGER_ID"])
+    if isinstance(id_value, tuple) and len(id_value) == 2:
+        kind, token = id_value
+        valid = (kind == "integer" and is_canonical_positive_decimal(token, maximum))
+    elif isinstance(id_value, str):
+        token = id_value
+        valid = is_canonical_positive_decimal(token, maximum)
+    else:
+        valid = False
+    if not valid:
         raise ValueError("non-canonical positive integer")
     print(token, end="")
 except (ValueError, TypeError, json.JSONDecodeError):
@@ -1466,6 +1465,141 @@ register_created_proxy_host() {
 extract_create_response_id() {
   local body="$1"
   extract_strict_positive_json_id "$body"
+}
+
+write_create_response_diagnostic() {
+  local body="$1"
+  local sequence="$2"
+  local diagnostic_file="${ROLLBACK_DIR:-}/create-response-diagnostic-$sequence.json"
+  local xtrace_was_enabled=0 diagnostic_status
+
+  [[ -n "$ROLLBACK_DIR" ]] || return 1
+  case "$-" in
+    *x*) xtrace_was_enabled=1; set +x ;;
+  esac
+  if CREATE_RESPONSE_DIAGNOSTIC_BODY="$body" python3 - "$diagnostic_file" <<'PY'
+import json
+import os
+import sys
+
+output_file = sys.argv[1]
+text = os.environ["CREATE_RESPONSE_DIAGNOSTIC_BODY"]
+
+class NumberToken:
+    def __init__(self, kind, token):
+        self.kind = kind
+        self.token = token
+
+class ObjectValue(dict):
+    def __init__(self, pairs):
+        super().__init__(pairs)
+        self.pairs = pairs
+        self.duplicate = len({key for key, _ in pairs}) != len(pairs)
+
+def preserve_object(pairs):
+    return ObjectValue(pairs)
+
+def preserve_integer(token):
+    return NumberToken("integer", token)
+
+def preserve_non_integer(token):
+    return NumberToken("non-integer", token)
+
+def reject_constant(token):
+    raise ValueError("non-JSON number")
+
+try:
+    decoder = json.JSONDecoder(
+        object_pairs_hook=preserve_object,
+        parse_int=preserve_integer,
+        parse_float=preserve_non_integer,
+        parse_constant=reject_constant,
+    )
+    start = len(text) - len(text.lstrip())
+    value, end = decoder.raw_decode(text, start)
+except (TypeError, ValueError, json.JSONDecodeError):
+    diagnostic = {"json_valid": False}
+else:
+    def has_duplicate_keys(candidate):
+        if isinstance(candidate, ObjectValue):
+            if candidate.duplicate:
+                return True
+            return any(has_duplicate_keys(child) for child in candidate.values())
+        if isinstance(candidate, list):
+            return any(has_duplicate_keys(child) for child in candidate)
+        return False
+
+    def has_nested_id(candidate, root=True):
+        if isinstance(candidate, ObjectValue):
+            if not root and any(key == "id" for key, _ in candidate.pairs):
+                return True
+            return any(has_nested_id(child, False) for child in candidate.values())
+        if isinstance(candidate, list):
+            return any(has_nested_id(child, False) for child in candidate)
+        return False
+
+    trailing_data = any(character not in " \t\r\n" for character in text[end:])
+    type_names = {
+        ObjectValue: "object",
+        list: "array",
+        str: "string",
+        bool: "boolean",
+        NumberToken: "number",
+        type(None): "null",
+    }
+    diagnostic = {
+        "json_valid": True,
+        "json_top_type": type_names[type(value)],
+        "id_present": isinstance(value, dict) and "id" in value,
+        "duplicate_key_detected": has_duplicate_keys(value),
+        "nested_id_detected": has_nested_id(value),
+        "trailing_data_detected": trailing_data,
+    }
+    if isinstance(value, ObjectValue):
+        diagnostic["top_level_key_count"] = len(value.pairs)
+        diagnostic["top_level_data_present"] = any(key == "data" for key, _ in value.pairs)
+        diagnostic["top_level_meta_present"] = any(key == "meta" for key, _ in value.pairs)
+    else:
+        diagnostic["top_level_key_count"] = 0
+        diagnostic["top_level_data_present"] = False
+        diagnostic["top_level_meta_present"] = False
+    if isinstance(value, dict) and "id" in value:
+        identifier = value["id"]
+        diagnostic["id_type"] = type_names[type(identifier)]
+        if isinstance(identifier, NumberToken):
+            diagnostic["id_number_kind"] = identifier.kind
+            diagnostic["id_token_length"] = len(identifier.token)
+            diagnostic["id_canonical_positive"] = bool(
+                identifier.kind == "integer"
+                and identifier.token
+                and identifier.token[0] != "0"
+                and all("0" <= character <= "9" for character in identifier.token)
+                and int(identifier.token) <= 9007199254740991
+            )
+        elif isinstance(identifier, str):
+            diagnostic["id_string_length"] = len(identifier)
+            diagnostic["id_string_canonical_decimal"] = bool(
+                identifier
+                and identifier[0] != "0"
+                and all("0" <= character <= "9" for character in identifier)
+            )
+    else:
+        diagnostic["id_type"] = "missing"
+
+with open(output_file, "w", encoding="utf-8") as output:
+    json.dump(diagnostic, output, sort_keys=True, separators=(",", ":"))
+    output.write("\n")
+PY
+  then
+    diagnostic_status=0
+  else
+    diagnostic_status=$?
+  fi
+  chmod 600 "$diagnostic_file" 2>/dev/null || diagnostic_status=1
+  if (( xtrace_was_enabled )); then
+    set -x
+  fi
+  return "$diagnostic_status"
 }
 
 same_proxy_host_state() {

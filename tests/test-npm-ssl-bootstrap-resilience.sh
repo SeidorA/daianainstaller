@@ -39,7 +39,7 @@ bash() {
 PATH="$MOCK_BIN:$PATH" \
   bash -c '
     source "$1"
-    payload="$(proxy_host_payload nginx nginx.example.test npm 81 0)"
+    payload="$(proxy_host_payload nginx nginx.example.test npm 81 "")"
     jq -e '\''type == "object" and .advanced_config == ""'\'' <<<"$payload" >/dev/null
     init_proxy_rollback
     expected='\''{"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":0,"ssl_forced":false,"hsts_enabled":false,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":false,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}'\''
@@ -189,9 +189,9 @@ if { [[ "$method" == PUT && "$path" == /api/nginx/proxy-hosts/* ]] ||
    if [[ "$scenario" == issuance-after-mutation-main && "$path" == "/api/nginx/proxy-hosts/7" ]]; then
      printf '%s' "$payload" > "${state_file}.proxy-host-7-current.json"
    fi
-  if [[ "$scenario" == verification-after-mutation-* && "$path" == "/api/nginx/proxy-hosts/7" && "$mutations" == 1 ]]; then
+   if [[ ( "$scenario" == verification-after-mutation-* || "$scenario" == tls-failure ) && "$path" == "/api/nginx/proxy-hosts/7" && "$mutations" == 1 ]]; then
     printf 'api-mutated' > "$proxy_state_file"
-   elif [[ "$scenario" == verification-after-mutation-* && "$path" == "/api/nginx/proxy-hosts/7" && ( "$mutations" == 2 || "$mutations" == 4 ) ]]; then
+    elif [[ ( "$scenario" == verification-after-mutation-* || "$scenario" == tls-failure ) && "$path" == "/api/nginx/proxy-hosts/7" && ( "$mutations" == 2 || "$mutations" == 4 ) ]]; then
      printf 'api-restored' > "$proxy_state_file"
      printf '1' > "${state_file}.restore-verifications"
      : > "${state_file}.proxy-host-7-restored"
@@ -358,7 +358,13 @@ if [[ "$scenario" == issuance-after-mutation-main && "$method" == PUT && "$path"
   exit 0
 fi
 if [[ "$scenario" == transient && "$method" == GET && "$path" == /api/nginx/proxy-hosts?per_page=200 && "$mutations" != 0 ]]; then
-  printf '%s\n200\n' '{"page":1,"per_page":200,"total":1,"data":[{"id":8,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":0,"ssl_forced":false,"hsts_enabled":false,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":false,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":null,"enabled":true,"locations":[]}]}'
+  printf '%s\n200\n' '{"page":1,"per_page":200,"total":1,"data":[{"id":8,"domain_names":["nginx.example.test"],"forward_scheme":"http","forward_host":"npm","forward_port":81,"certificate_id":0,"ssl_forced":false,"hsts_enabled":false,"hsts_subdomains":false,"trust_forwarded_proto":true,"http2_support":false,"block_exploits":true,"caching_enabled":false,"allow_websocket_upgrade":true,"access_list_id":0,"advanced_config":"","enabled":true,"locations":[]}]}'
+  exit 0
+fi
+if [[ "$scenario" == post-500-side-effect || "$scenario" == post-transport-side-effect ]] &&
+   [[ "$method" == GET && "$path" == /api/nginx/proxy-hosts?per_page=200 && "$mutations" != 0 ]]; then
+  jq -n '{page:1,per_page:200,total:1,data:[{id:8,domain_names:["nginx.example.test"],forward_scheme:"http",forward_host:"npm",forward_port:81,certificate_id:0,ssl_forced:false,hsts_enabled:false,hsts_subdomains:false,trust_forwarded_proto:true,http2_support:false,block_exploits:true,caching_enabled:false,allow_websocket_upgrade:true,access_list_id:0,advanced_config:"",enabled:true,locations:[]}]}'
+  printf '200\n'
   exit 0
 fi
 if [[ "$scenario" == post-500-side-effect || "$scenario" == post-transport-side-effect ]]; then
@@ -458,7 +464,7 @@ run_bootstrap() {
     *x*) xtrace_was_enabled=1; set +x ;;
   esac
   if NPM_TEST_SCENARIO="$scenario" NPM_TEST_STATE="$TMP_DIR/$scenario.state" CERT_CREATE_RESPONSE="${CERT_CREATE_RESPONSE:-}" \
-    PATH="$MOCK_BIN:$PATH" BASE_DOMAIN=example.test NPM_ADMIN_EMAIL=admin@example.test \
+     PATH="$MOCK_BIN:$PATH" BASE_DOMAIN=example.test NPM_TLS_VERIFY_IP=192.168.0.19 NPM_ADMIN_EMAIL=admin@example.test \
      NPM_API_URL=http://127.0.0.1:81 \
     NPM_CONNECT_TIMEOUT=1 NPM_OPERATION_TIMEOUT=1 NPM_READY_DELAY=0 NPM_READY_ATTEMPTS=3 \
     ONLY_PREFIX=nginx TLS_MODE="$tls_mode" \
@@ -817,8 +823,10 @@ NPM_TEST_SCENARIO=rollback-unit PATH="$MOCK_BIN:$PATH" \
        case "$1" in
           /api/nginx/proxy-hosts/7) host_state="{\"id\":7,\"domain_names\":[\"seven.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0,\"ssl_forced\":false,\"hsts_enabled\":false,\"hsts_subdomains\":false,\"trust_forwarded_proto\":true,\"http2_support\":false,\"block_exploits\":true,\"caching_enabled\":false,\"allow_websocket_upgrade\":true,\"access_list_id\":0,\"advanced_config\":null,\"enabled\":true,\"locations\":[]}";;
           /api/nginx/proxy-hosts/8) host_state="{\"id\":8,\"domain_names\":[\"eight.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0,\"ssl_forced\":false,\"hsts_enabled\":false,\"hsts_subdomains\":false,\"trust_forwarded_proto\":true,\"http2_support\":false,\"block_exploits\":true,\"caching_enabled\":false,\"allow_websocket_upgrade\":true,\"access_list_id\":0,\"advanced_config\":null,\"enabled\":true,\"locations\":[]}";;
-       esac
-       printf "%s" "$host_state" > "$ROLLBACK_STATE_DIR/host-$host_id-current.json"
+        esac
+        host_state="${host_state//advanced_config:null/advanced_config:\"\"}"
+        host_state="$(jq -c '\''.advanced_config = ""'\'' <<<"$host_state")"
+        printf "%s" "$host_state" > "$ROLLBACK_STATE_DIR/host-$host_id-current.json"
        if [[ -f "$ROLLBACK_STATE_DIR/host-$host_id-restored" ]]; then
          counter_file="$ROLLBACK_STATE_DIR/host-$host_id-rereads"
          rereads=0
@@ -1233,11 +1241,11 @@ PATH="$MOCK_BIN:$PATH" \
     done
   ' _ "$SCRIPT"
 
-# Create responses must contain a JSON number with a canonical decimal
-# representation. Numeric-looking strings, exponent forms, and non-integers
-# are rejected before registration or URL construction; a valid numeric ID is
-# registered only after the unique new inventory match is proved.
-for create_id in '"8"' '"08"' '8e0' '8.5' '-8' '0'; do
+# Create responses must contain a JSON number or canonical decimal string
+# representation. Exponent forms and non-integers are rejected before
+# registration or URL construction; a valid ID is registered only after the
+# unique new inventory match is proved.
+for create_id in '"03"' '"08"' '"3.0"' '"3e0"' '""' '"-8"' '" 8"' '"8 "' '8e0' '8.5' '-8' '0'; do
   PATH="$MOCK_BIN:$PATH" \
     CREATE_ID="$create_id" bash -c '
       source "$1"
@@ -1255,6 +1263,31 @@ for create_id in '"8"' '"08"' '8e0' '8.5' '-8' '0'; do
         exit 1
       fi
       [[ ! -s "$ROLLBACK_RECORDS" ]]
+    ' _ "$SCRIPT"
+done
+
+# Canonical positive decimal strings are parsed, then still require the
+# post-create inventory and payload validation before registration.
+for create_response in '{"id":"8"}' '{"id":"9007199254740991"}'; do
+  PATH="$MOCK_BIN:$PATH" \
+    CREATE_RESPONSE="$create_response" bash -c '
+      source "$1"
+      init_proxy_rollback
+      before="$ROLLBACK_DIR/before.json"
+      printf "[]\n" >"$before"
+      proxy_host_payload() { printf "%s" "{\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}"; }
+      api_get() {
+        if [[ "$CREATE_RESPONSE" == *9007199254740991* ]]; then
+          printf "%s\n" "{\"page\":1,\"per_page\":200,\"total\":1,\"data\":[{\"id\":9007199254740991,\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}]}"
+        else
+          printf "%s\n" "{\"page\":1,\"per_page\":200,\"total\":1,\"data\":[{\"id\":8,\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}]}"
+        fi
+      }
+      curl() { printf "%s\n201\n" "$CREATE_RESPONSE"; }
+      expected_id=8
+      [[ "$CREATE_RESPONSE" == *9007199254740991* ]] && expected_id=9007199254740991
+      [[ "$(create_proxy_host nginx nginx.example.test npm 81 0 "$before" 1)" == "$expected_id" ]]
+      [[ "$(<"$ROLLBACK_RECORDS")" == "created|$expected_id|" ]]
     ' _ "$SCRIPT"
 done
 
@@ -1277,10 +1310,9 @@ PATH="$MOCK_BIN:$PATH" \
 # values, strings, null, sign, zero, fraction, exponent, and malformed JSON.
 for create_response in \
   '{"data":{"id":8}}' \
-  '{"id":8,"data":{"id":9}}' \
   '{"id":8,"id":9}' \
   '{"id":8} {"id":9}' $'null\n{"id":8}' \
-  '{"id":"8"}' '{"id":"08"}' '{"id":null}' '{"id":-8}' \
+  '{"id":"03"}' '{"id":"08"}' '{"id":"3.0"}' '{"id":"3e0"}' '{"id":""}' '{"id":"-8"}' '{"id":" 8"}' '{"id":"8 "}' '{"id":null}' '{"id":-8}' \
   '{"id":0}' '{"id":8.5}' '{"id":8e0}' '[]' 'null' 'malformed-response'; do
   PATH="$MOCK_BIN:$PATH" \
     CREATE_RESPONSE="$create_response" bash -c '
@@ -1298,6 +1330,93 @@ for create_response in \
       fi
       [[ ! -s "$ROLLBACK_RECORDS" ]]
     ' _ "$SCRIPT"
+done
+
+# Rejected create responses leave only structural, sanitized diagnostics. The
+# invalid-JSON case deliberately contains secret-like text to prove no content
+# is copied into the diagnostic.
+for diagnostic_case in valid-rejected invalid-json; do
+  PATH="$MOCK_BIN:$PATH" DIAGNOSTIC_CASE="$diagnostic_case" bash -c '
+    source "$1"
+    init_proxy_rollback
+    before="$ROLLBACK_DIR/before.json"
+    printf "[]\n" >"$before"
+    proxy_host_payload() { printf "%s" "{\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}"; }
+    api_get() { printf "%s\n" "[]"; }
+    if [[ "$DIAGNOSTIC_CASE" == valid-rejected ]]; then
+      CREATE_RESPONSE="{\"id\":\"08\",\"secret\":\"super-secret\",\"payload\":{\"token\":\"payload-secret\"}}"
+    else
+      CREATE_RESPONSE="not-json super-secret payload-secret"
+    fi
+    curl() { printf "%s\n201\n" "$CREATE_RESPONSE"; }
+    ! create_proxy_host nginx nginx.example.test npm 81 0 "$before" 1
+    diagnostic="$ROLLBACK_DIR/create-response-diagnostic-1.json"
+    [[ -s "$diagnostic" ]]
+    if [[ "$DIAGNOSTIC_CASE" == valid-rejected ]]; then
+      jq -e ".json_valid == true and .json_top_type == \"object\" and .id_present == true and .id_type == \"string\" and .id_string_length == 2 and .id_string_canonical_decimal == false" "$diagnostic" >/dev/null
+      ! grep -Eq "08|super-secret|payload-secret|secret|token" "$diagnostic"
+    else
+      [[ "$(<"$diagnostic")" == "{\"json_valid\":false}" ]]
+      ! grep -Eq "super-secret|payload-secret|not-json|payload" "$diagnostic"
+    fi
+  ' _ "$SCRIPT"
+done
+
+PATH="$MOCK_BIN:$PATH" bash -c '
+  source "$1"
+  init_proxy_rollback
+  before="$ROLLBACK_DIR/before.json"
+  printf "[]\n" >"$before"
+  proxy_host_payload() { printf "%s" "{\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}"; }
+  api_get() { printf "%s\n" "{\"page\":1,\"per_page\":200,\"total\":1,\"data\":[{\"id\":8,\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}]}"; }
+  curl() { printf "%s\n201\n" "{\"id\":8,\"meta\":{\"id\":1}}"; }
+  [[ "$(create_proxy_host nginx nginx.example.test npm 81 0 "$before" 1)" == 8 ]]
+  [[ "$(<"$ROLLBACK_RECORDS")" == "created|8|" ]]
+' _ "$SCRIPT"
+
+for numeric_response in '{"id":8.5}' '{"id":8e0}'; do
+  PATH="$MOCK_BIN:$PATH" CREATE_RESPONSE="$numeric_response" bash -c '
+    source "$1"
+    init_proxy_rollback
+    before="$ROLLBACK_DIR/before.json"
+    printf "[]\n" >"$before"
+    proxy_host_payload() { printf "%s" "{\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}"; }
+    api_get() { printf "%s\n" "[]"; }
+    curl() { printf "%s\n201\n" "$CREATE_RESPONSE"; }
+    ! create_proxy_host nginx nginx.example.test npm 81 0 "$before" 1
+    diagnostic="$ROLLBACK_DIR/create-response-diagnostic-1.json"
+    jq -e ".json_valid == true and .json_top_type == \"object\" and .id_present == true and .id_type == \"number\" and .id_number_kind == \"non-integer\" and .id_token_length == 3 and .id_canonical_positive == false" "$diagnostic" >/dev/null
+    ! grep -Eq "8\.5|8e0|payload|secret" "$diagnostic"
+  ' _ "$SCRIPT"
+done
+
+for structural_case in duplicate nested trailing; do
+  PATH="$MOCK_BIN:$PATH" STRUCTURAL_CASE="$structural_case" bash -c '
+    source "$1"
+    init_proxy_rollback
+    before="$ROLLBACK_DIR/before.json"
+    printf "[]\n" >"$before"
+    proxy_host_payload() { printf "%s" "{\"domain_names\":[\"nginx.example.test\"],\"forward_scheme\":\"http\",\"forward_host\":\"npm\",\"forward_port\":81,\"certificate_id\":0}"; }
+    api_get() { printf "%s\n" "[]"; }
+    case "$STRUCTURAL_CASE" in
+      duplicate) CREATE_RESPONSE="{\"id\":1,\"id\":2,\"secret\":\"fixture-secret\"}" ;;
+      nested) CREATE_RESPONSE="{\"data\":{\"id\":2,\"secret\":\"fixture-secret\"}}" ;;
+      trailing) CREATE_RESPONSE="{\"id\":1} {\"secret\":\"fixture-secret\"}" ;;
+    esac
+    curl() { printf "%s\n201\n" "$CREATE_RESPONSE"; }
+    ! create_proxy_host nginx nginx.example.test npm 81 0 "$before" 1
+    diagnostic="$ROLLBACK_DIR/create-response-diagnostic-1.json"
+    [[ -s "$diagnostic" ]]
+    case "$STRUCTURAL_CASE" in
+      duplicate)
+        jq -e ".duplicate_key_detected == true and .nested_id_detected == false and .trailing_data_detected == false and .top_level_key_count == 3 and .top_level_data_present == false" "$diagnostic" >/dev/null ;;
+      nested)
+        jq -e ".duplicate_key_detected == false and .nested_id_detected == true and .trailing_data_detected == false and .top_level_key_count == 1 and .top_level_data_present == true" "$diagnostic" >/dev/null ;;
+      trailing)
+        jq -e ".duplicate_key_detected == false and .nested_id_detected == false and .trailing_data_detected == true and .top_level_key_count == 1" "$diagnostic" >/dev/null ;;
+    esac
+    ! grep -Eq "fixture-secret|secret|payload|\\\"id\\\"[[:space:]]*:" "$diagnostic"
+  ' _ "$SCRIPT"
 done
 
 # The exact jq/JSON-safe upper bound is accepted at every JSON create-ID
@@ -1340,7 +1459,7 @@ PATH="$MOCK_BIN:$PATH" \
 for certificate_response in \
   '{"data":{"id":8}}' '{"id":8,"id":9}' '{"id":8} {"id":9}' \
   '{"id":8,"data":{"id":9}}' $'null\n{"id":8}' \
-  '{"id":"8"}' '{"id":"08"}' '{"id":null}' '{"id":-8}' \
+  '{"id":"03"}' '{"id":"08"}' '{"id":"3.0"}' '{"id":"3e0"}' '{"id":""}' '{"id":"-8"}' '{"id":" 8"}' '{"id":"8 "}' '{"id":null}' '{"id":-8}' \
   '{"id":0}' '{"id":8.5}' '{"id":8e0}' '[]' 'null' 'malformed-response'; do
   certificate_state="$TMP_DIR/certificate-invalid-${RANDOM}.state"
   if CERT_CREATE_RESPONSE="$certificate_response" NPM_TEST_SCENARIO=custom-invalid NPM_TEST_STATE="$certificate_state" \
