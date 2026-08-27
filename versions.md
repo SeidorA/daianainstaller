@@ -1,5 +1,9 @@
 # Docker Image Versions
 
+## 2026-08-27
+- Installer `v0.3.1` includes the backward-compatible WebUI CORS fix: `docker-compose.app.yml` now allows both `${SITE_URL}` and `${WEBUI_BASE_URL}`.
+- Installer versioning is independent from application image versions.
+
 ## 2026-08-26
 - Installer `v0.3.0` is independent from Daiana application image versions.
 - Release bundles present in this repository: `releases/v2.2.0.json`, `releases/v2.4.1.json`, `releases/prod-v2.4.0-studio-mapping.json`, `releases/qa-v2.3.0-studio-v3.1.3.json`, and `releases/shared-message-quota.json`.
