@@ -195,7 +195,7 @@ services:
       - ./volumes/daiana/webui/data:/app/backend/data
     environment:
       WEBUI_URL: ${WEBUI_BASE_URL}
-      CORS_ALLOW_ORIGIN: ${SITE_URL}
+      CORS_ALLOW_ORIGIN: ${SITE_URL};${WEBUI_BASE_URL}
       FORWARDED_ALLOW_IPS: '*'
       SCARF_NO_ANALYTICS: true
       DO_NOT_TRACK: true
