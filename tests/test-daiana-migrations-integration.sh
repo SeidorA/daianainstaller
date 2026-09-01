@@ -42,6 +42,7 @@ for pg_version in $VERSIONS; do
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
 CREATE ROLE service_role NOLOGIN;
+CREATE ROLE supabase_admin LOGIN SUPERUSER PASSWORD 'test-password';
 CREATE SCHEMA private AUTHORIZATION postgres;
 CREATE TABLE public.tenants ("idTenant" integer PRIMARY KEY);
 CREATE TABLE public.tenant_plans (
@@ -132,11 +133,11 @@ SQL
     SELECT has_function_privilege('service_role', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
     SELECT NOT has_function_privilege('authenticated', 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)', 'EXECUTE');
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
-    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
+     SELECT pg_get_userbyid(proowner) = 'supabase_admin' FROM pg_proc WHERE oid = 'public.reserve_tenant_message_quota(integer,text,text,text,text,text,timestamptz)'::regprocedure;
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
-    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
+     SELECT pg_get_userbyid(proowner) = 'supabase_admin' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,jsonb,timestamptz)'::regprocedure;
     SELECT proconfig = ARRAY['search_path=pg_catalog, public'] FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;
-    SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
+     SELECT pg_get_userbyid(proowner) = 'postgres' FROM pg_proc WHERE oid = 'public.finalize_tenant_message_quota_turn(text,text,jsonb,timestamptz)'::regprocedure;")"
   [ "$(printf '%s\n' "$result" | grep -c '^t$')" -eq 27 ] || die "PostgreSQL $pg_version standard-profile/replay/checksum/object/RPC/privilege checks failed: $result"
 
   docker exec -i -e PGPASSWORD=test-password "$container" psql -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'

@@ -52,6 +52,10 @@ first_prefix="${sql%%CREATE TABLE public.first_migration*}"
 [[ "$first_prefix" != *'CREATE TABLE public.second_migration'* ]] || fail "migrations are not lexically ordered"
 pass "runner emits ordered lock/checksum/transaction contract"
 
+grep -q 'as supabase_admin' "$ROOT_DIR/utils/daiana-migrations.sh" || fail "migration role log does not identify supabase_admin"
+grep -q -- '-U supabase_admin' "$ROOT_DIR/utils/daiana-migrations.sh" || fail "migration runner does not connect as supabase_admin"
+pass "migration transaction executes as supabase_admin"
+
 DOCKER_RESULT=17
 DOCKER_ERROR='ERROR: syntax error at or near "CREATE"'
 LOG_OUTPUT=""

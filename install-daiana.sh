@@ -503,6 +503,12 @@ load_dotenv() {
 }
 
 load_dotenv .env 0
+LOCAL_PROVISION_IMAGES="${LOCAL_PROVISION_IMAGES:-0}"
+case "$LOCAL_PROVISION_IMAGES" in
+  0|1) ;;
+  *) die "LOCAL_PROVISION_IMAGES must be 0 or 1" ;;
+esac
+export LOCAL_PROVISION_IMAGES
 if [ "$CREATED_ENV" = "1" ]; then
   log "Created a fresh .env; checking which values must be prompted, generated, or derived."
 else
@@ -994,6 +1000,27 @@ compose_service_image() {
     in_service && $0 ~ /^  [A-Za-z0-9_-]+:$/ { in_service=0 }
     in_service && $1 == "image:" { print $2; exit }
   ' "$compose_file"
+}
+
+configure_local_provision_compose() {
+  [ "$LOCAL_PROVISION_IMAGES" = "1" ] || return 0
+  local override_file="$ROOT_DIR/docker-compose.local-provision.yml"
+  [ -f "$override_file" ] || die "Local provisioning mode requires $override_file"
+  APP_DEPLOY_COMPOSE_FILES+=("$override_file")
+  log "Local provisioning mode enabled; using local Daiana image override"
+}
+
+validate_local_provision_images() {
+  [ "$LOCAL_PROVISION_IMAGES" = "1" ] || return 0
+  local tag
+  for tag in daiana-local:studio-provision daianastudio-local:account-provision; do
+    log "Checking local provisioning image: $tag"
+    if [ "$DRY_RUN" = "1" ]; then
+      log "Dry-run: would verify local Docker image tag $tag"
+    elif ! docker_cmd image inspect "$tag" >/dev/null 2>&1; then
+      die "Required local image $tag is missing. Build it locally before running the installer (see docker-compose.local-provision.yml)."
+    fi
+  done
 }
 
 normalize_daiana_version() {
@@ -1988,6 +2015,7 @@ bootstrap_portainer() {
 SUPABASE_COMPOSE_FILES=(docker-compose.yml)
 APP_COMPOSE_FILES=(docker-compose.yml docker-compose.app.yml)
 APP_DEPLOY_COMPOSE_FILES=("${APP_COMPOSE_FILES[@]}")
+EMPTY_REGISTRIES_VAR=""
 UPDATE_COMPOSE_OVERRIDE_FILE=""
 BUNDLE_PRESERVED_COMPOSE_OVERRIDE_FILE=""
 UPDATE_HISTORY_DIR="${UPDATE_HISTORY_DIR:-./volumes/daiana/update-history}"
@@ -2229,12 +2257,14 @@ Would:
 - initialize/authenticate Portainer admin
 - create/update Portainer stack: $NPM_STACK_NAME from docker-compose.npm.yml
 - create/update Portainer stack: $APP_STACK_NAME from ${SUPABASE_COMPOSE_FILES[*]}
-- authenticate Portainer to the private Daiana image registry when needed
+- local provisioning mode: $([ "$LOCAL_PROVISION_IMAGES" = "1" ] && printf 'enabled' || printf 'disabled')
+- local provisioning image checks: $([ "$LOCAL_PROVISION_IMAGES" = "1" ] && printf 'daiana-local:studio-provision, daianastudio-local:account-provision' || printf 'skipped')
+- authenticate Portainer to the private Daiana image registry when needed (production mode only)
 - wait for core Supabase to become healthy
 - wait for Supabase Auth migrations to finish
 - wait for PostgreSQL entrypoint structural init, then run post-start seeds: auth, public, studio, webui, vault
 - verify/apply ordered Daiana database migrations before app deployment
-- create/update Portainer stack: $APP_STACK_NAME from ${APP_COMPOSE_FILES[*]}
+- create/update Portainer stack: $APP_STACK_NAME from ${APP_COMPOSE_FILES[*]}$([ "$LOCAL_PROVISION_IMAGES" = "1" ] && printf ' docker-compose.local-provision.yml' || true)
 - wait for NPM at $NPM_URL/api
 - create proxy hosts without TLS:
   - port.$BASE_DOMAIN
@@ -2251,6 +2281,9 @@ Would:
 - validate current Daiana container image versions
 - create a rollback snapshot before a normal update
 - check for missing/new env vars
+- local provisioning mode: $([ "$LOCAL_PROVISION_IMAGES" = "1" ] && printf 'enabled' || printf 'disabled')
+- local provisioning image checks: $([ "$LOCAL_PROVISION_IMAGES" = "1" ] && printf 'daiana-local:studio-provision, daianastudio-local:account-provision' || printf 'skipped')
+- skip private registry authentication and Daiana image pre-pulls in local mode
 - wait for Supabase, verify/apply Daiana database migrations, then update app images
 - wait for NPM at $NPM_URL/api
 EOF
@@ -2317,17 +2350,27 @@ if [ "$ACTION" = "update" ]; then
   PORTAINER_ENDPOINT_ID="$(portainer_ensure_endpoint)"
   [ -n "$PORTAINER_ENDPOINT_ID" ] || die "Could not determine Portainer endpoint id"
   if [ "$ROLLBACK_MODE" = "1" ]; then
-    log "Preparing private registry access for Daiana images"
-    portainer_ensure_private_registry
-    CURRENT_PHASE="pre-pulling rollback images"
-    prepull_status=0
-    prepull_xtrace_was_enabled=0
-    case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
-    prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
-    if (( prepull_xtrace_was_enabled )); then set -x; fi
-    [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull rollback images; Portainer may still require registry access"
+    if [ "$LOCAL_PROVISION_IMAGES" != "1" ]; then
+      log "Preparing private registry access for Daiana images"
+      portainer_ensure_private_registry
+      CURRENT_PHASE="pre-pulling rollback images"
+      prepull_status=0
+      prepull_xtrace_was_enabled=0
+      case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
+      prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
+      if (( prepull_xtrace_was_enabled )); then set -x; fi
+      [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull rollback images; Portainer may still require registry access"
+    else
+      log "Local provisioning mode: skipping private registry setup and rollback image pre-pull"
+    fi
+    configure_local_provision_compose
+    validate_local_provision_images
     log "Rolling back Daiana app stack via Portainer"
-    portainer_rollback_stack "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
+    if [ "$LOCAL_PROVISION_IMAGES" = "1" ]; then
+      portainer_rollback_stack "$APP_STACK_NAME" APP_STACK_ENV_JSON EMPTY_REGISTRIES_VAR "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
+    else
+      portainer_rollback_stack "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "$ROLLBACK_SNAPSHOT_DIR/docker-compose.before.yml"
+    fi
     cat <<EOF
 
 Rollback complete.
@@ -2344,6 +2387,9 @@ else
   ensure_network
   bootstrap_portainer
 fi
+
+configure_local_provision_compose
+validate_local_provision_images
 
 log "Deploying NPM stack via Portainer"
 portainer_upsert_stack_from_vars "$NPM_STACK_NAME" NPM_STACK_ENV_JSON EMPTY_REGISTRIES_VAR docker-compose.npm.yml
@@ -2368,26 +2414,34 @@ ensure_app_storage_directories
 log "Applying Flowise storage ownership"
 ensure_flowise_storage_permissions
 
-log "Preparing private registry access for Daiana images"
-portainer_ensure_private_registry
+if [ "$LOCAL_PROVISION_IMAGES" != "1" ]; then
+  log "Preparing private registry access for Daiana images"
+  portainer_ensure_private_registry
 
-CURRENT_PHASE="pre-pulling Daiana images"
-if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
-  prepull_deployment_bundle_images
+  CURRENT_PHASE="pre-pulling Daiana images"
+  if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
+    prepull_deployment_bundle_images
+  else
+    prepull_status=0
+    prepull_xtrace_was_enabled=0
+    case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
+    prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
+    if (( prepull_xtrace_was_enabled )); then set -x; fi
+    [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
+  fi
 else
-  prepull_status=0
-  prepull_xtrace_was_enabled=0
-  case "$-" in *x*) prepull_xtrace_was_enabled=1; set +x ;; esac
-  prepull_daiana_images "${PORTAINER_PRIVATE_REGISTRY_USERNAME:-${DAIANA_REGISTRY_USERNAME:-}}" "${PORTAINER_PRIVATE_REGISTRY_PAT:-${DAIANA_REGISTRY_PAT:-}}" || prepull_status=$?
-  if (( prepull_xtrace_was_enabled )); then set -x; fi
-  [ "$prepull_status" -eq 0 ] || warn "Could not pre-pull Daiana images; Portainer may still require registry access"
+  log "Local provisioning mode: skipping private registry setup and Daiana image pre-pull"
 fi
 
 log "Deploying Daiana app stack via Portainer"
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   log "Complete deployment bundle replacement start: sha256:$BUNDLE_SHA256; rollback snapshot=$LAST_UPDATE_SNAPSHOT_DIR"
 fi
-portainer_upsert_stack_from_vars "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "${APP_DEPLOY_COMPOSE_FILES[@]}"
+if [ "$LOCAL_PROVISION_IMAGES" = "1" ]; then
+  portainer_upsert_stack_from_vars "$APP_STACK_NAME" APP_STACK_ENV_JSON EMPTY_REGISTRIES_VAR "${APP_DEPLOY_COMPOSE_FILES[@]}"
+else
+  portainer_upsert_stack_from_vars "$APP_STACK_NAME" APP_STACK_ENV_JSON PORTAINER_DAIA_REGISTRIES_JSON "${APP_DEPLOY_COMPOSE_FILES[@]}"
+fi
 if [ "${BUNDLE_ACTIVE:-0}" = "1" ]; then
   log "Complete deployment bundle replacement finish: sha256:$BUNDLE_SHA256"
 fi

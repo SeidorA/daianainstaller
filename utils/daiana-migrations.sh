@@ -213,7 +213,7 @@ run_daiana_migrations() {
     die "No Daiana migration files found in $DAIANA_MIGRATIONS_DIR"
   fi
 
-  log "Running $migration_count ordered Daiana migration file(s) as postgres"
+  log "Running $migration_count ordered Daiana migration file(s) as supabase_admin"
   # The first line on stdin is consumed by the container-local shell and used
   # to create the libpq password environment. The migration SQL follows on the
   # same pipe, so the password never appears in docker's argv or process list.
@@ -225,7 +225,7 @@ run_daiana_migrations() {
   if { printf '%s\n' "$POSTGRES_PASSWORD"; cat "$migration_sql"; } | \
       docker_cmd exec -i "$DAIANA_DB_CONTAINER" \
       sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$@"' sh \
-      -X -h 127.0.0.1 -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /dev/stdin >"$output_file" 2>&1; then
+      -X -h 127.0.0.1 -U supabase_admin -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /dev/stdin >"$output_file" 2>&1; then
     rc=0
   else
     rc=$?
