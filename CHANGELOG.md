@@ -18,6 +18,11 @@ See per-service updates below for details. Only the most important changes relev
 - ⚠️ **Breaking change** (week of July 6, 2026): Access to the OpenAPI spec at `/rest/v1/` via the anon (publishable) key will be removed. Requests using the service role or new secret keys are unaffected, and data access via `/rest/v1/your_table` or any client library continues to work as it does today. See discussion [#42949](https://github.com/orgs/supabase/discussions/42949).
 - ⚠️ **Breaking change** (week of July 6, 2026): `API_EXTERNAL_URL` will be updated to include the `/auth/v1` path prefix (e.g. `http://localhost:8000/auth/v1`), aligning self-hosted with the platform and CLI. This makes custom OAuth providers work out of the box and moves SAML SSO endpoints to `/auth/v1/sso/saml/*`. See discussion [#47093](https://github.com/orgs/supabase/discussions/47093).
 
+## v0.3.2 - 2026-09-01
+
+### WebUI
+- Updated the WebUI image from `v0.10.2` to `v0.11.1`.
+
 ## v0.3.1 - 2026-08-27
 
 ### WebUI

@@ -1,5 +1,8 @@
 # Docker Image Versions
 
+## 2026-09-01
+- WebUI image updated to `cloudseidoranalytics/daianawebui:v0.11.1` (previously `cloudseidoranalytics/daianawebui:v0.10.2`).
+
 ## 2026-08-27
 - Installer `v0.3.1` includes the backward-compatible WebUI CORS fix: `docker-compose.app.yml` now allows both `${SITE_URL}` and `${WEBUI_BASE_URL}`.
 - Installer versioning is independent from application image versions.
