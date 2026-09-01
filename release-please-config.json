@@ -1,0 +1,11 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "daiana-installer",
+      "version-file": "VERSION",
+      "changelog-path": "CHANGELOG.md",
+      "include-v-in-tag": true
+    }
+  }
+}

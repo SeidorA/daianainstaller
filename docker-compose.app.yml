@@ -192,7 +192,7 @@ services:
           - node.role == manager
 
   daianawebui:
-    image: cloudseidoranalytics/daianawebui:v0.10.2
+    image: cloudseidoranalytics/daianawebui:v0.11.1
     container_name: daiana-webui
     volumes:
       - ./volumes/daiana/webui/data:/app/backend/data
