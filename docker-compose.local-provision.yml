@@ -1,0 +1,10 @@
+# Local provisioning validation only; do not use this override for published images.
+# Build both images from the corresponding daiananext and daianastudio worktrees first.
+services:
+  daiananext:
+    image: daiana-local:studio-provision
+    pull_policy: never
+
+  daianastudio:
+    image: daianastudio-local:account-provision
+    pull_policy: never
