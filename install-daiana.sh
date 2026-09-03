@@ -869,6 +869,7 @@ ensure_secret() {
   ensure_secret WHATSAPP_SECRET_KEY 64
   ensure_secret BOT_SECRET_KEY 64
   ensure_secret AUTH_KEY 64
+  ensure_secret STUDIO_PROVISIONING_SECRET 64
 
   if [ "$changed" = "1" ]; then
     CURRENT_PHASE="refreshing env after Daiana defaults"

@@ -70,8 +70,59 @@ update_default_pins() {
   for index in "${!SERVICE_NAMES[@]}"; do
     service="${SERVICE_NAMES[$index]}"
     image="${IMAGE_NAMES[$index]}"
-    perl -0pi -e "s{(^[ \t]*\Q$service\E:\n[ \t]*image: \Q$NAMESPACE/$image\E:)v[0-9]+\\.[0-9]+\\.[0-9]+$}{\$1$VERSION}m" "$temporary_file"
-    grep -Eq "^[[:space:]]*image: $NAMESPACE/$image:$VERSION$" "$temporary_file" || die "Unable to update the $service default pin"
+    if ! TARGET_SERVICE="$service" TARGET_IMAGE="$NAMESPACE/$image" TARGET_VERSION="$VERSION" perl -0pi -e '
+      my $target_service = $ENV{TARGET_SERVICE};
+      my $target_image = $ENV{TARGET_IMAGE};
+      my $target_version = $ENV{TARGET_VERSION};
+      my @lines = split /(?<=\n)/, $_, -1;
+      my ($services_indent, $service_key_indent) = (undef, undef);
+      my ($in_service, $service_indent, $child_indent, $updated) = (0, undef, undef, 0);
+
+      for my $line (@lines) {
+        (my $content = $line) =~ s/\r?\n\z//;
+
+        if (!defined $services_indent && $content =~ /^([ \t]*)services:[ \t]*(?:#.*)?$/) {
+          $services_indent = length($1);
+          next;
+        }
+
+        if (defined $services_indent && !defined $service_key_indent &&
+            $content =~ /^([ \t]+)[A-Za-z0-9_.-]+:[ \t]*(?:.*)?$/ && length($1) > $services_indent) {
+          $service_key_indent = length($1);
+        }
+
+        if (!$in_service && defined $service_key_indent &&
+            $content =~ /^([ \t]*)\Q$target_service\E:[ \t]*(?:#.*)?$/ &&
+            length($1) == $service_key_indent) {
+          $service_indent = length($1);
+          $child_indent = undef;
+          $in_service = 1;
+          next;
+        }
+
+        if ($in_service && $content =~ /^([ \t]*)\S.*:[ \t]*(?:#.*)?$/ && length($1) <= $service_indent) {
+          $in_service = 0;
+          next;
+        }
+
+        next unless $in_service;
+        if ($content =~ /^([ \t]+)([A-Za-z0-9_.-]+):[ \t]*(?:.*)?$/) {
+          my $indent = length($1);
+          $child_indent = $indent unless defined $child_indent;
+          next unless $indent == $child_indent && $2 eq "image";
+          if ($content =~ /^([ \t]*image:[ \t]*)\Q$target_image\E:v[0-9]+\.[0-9]+\.[0-9]+([ \t]*(?:#.*)?)$/) {
+            $line =~ s{(\Q$target_image\E:)v[0-9]+\.[0-9]+\.[0-9]+}{$1$target_version};
+            $updated = 1;
+          }
+        }
+      }
+
+      die "target service/image pin was not updated" unless $updated;
+      $_ = join "", @lines;
+    ' "$temporary_file"; then
+      rm -f "$temporary_file"
+      die "Unable to update the $service default pin"
+    fi
   done
   mv "$temporary_file" "$compose_file"
 }
