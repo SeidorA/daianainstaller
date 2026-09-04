@@ -659,6 +659,8 @@ tls_domain_for_service() {
   domain_var="DOMAIN_$(printf '%s' "$prefix" | tr '[:lower:]' '[:upper:]')"
   if [[ "$prefix" == "daiana" ]] && is_ipv4_or_nip_io_domain "$BASE_DOMAIN"; then
     printf '%s.%s' "$prefix" "$BASE_DOMAIN"
+  elif [[ "$prefix" == "daiana" ]]; then
+    printf '%s' "$BASE_DOMAIN"
   elif [[ -n "${!domain_var:-}" ]]; then
     printf '%s' "${!domain_var}"
   elif [[ "$BASE_DOMAIN" == "${prefix}."* ]]; then
