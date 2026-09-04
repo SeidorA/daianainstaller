@@ -583,7 +583,15 @@ fi
     [[ "$(extract_nip_io_ip 192.168.0.19.nip.io)" == 192.168.0.19 ]]
     BASE_DOMAIN=192.168.0.19.nip.io NPM_TLS_VERIFY_IP=""
     [[ "$(derive_tls_verify_ip whatsapp.192.168.0.19.nip.io)" == 192.168.0.19 ]]
+    DOMAIN_DAIANA=custom.example.test
+    [[ "$(tls_domain_for_service daiana)" == daiana.192.168.0.19.nip.io ]] || exit 1
+    BASE_DOMAIN=192.168.0.19
+    [[ "$(tls_domain_for_service daiana)" == daiana.192.168.0.19 ]] || exit 1
+    BASE_DOMAIN=192.168.0.19.nip.io
+    DOMAIN_NGINX=custom-nginx.example.test
+    [[ "$(tls_domain_for_service nginx)" == custom-nginx.example.test ]] || exit 1
     BASE_DOMAIN=public.example.test
+    [[ "$(tls_domain_for_service daiana)" == custom.example.test ]] || exit 1
     NPM_TLS_VERIFY_IP=192.168.0.19
     [[ "$(derive_tls_verify_ip whatsapp.public.example.test)" == 192.168.0.19 ]]
     BASE_DOMAIN=wrong.nip.io NPM_TLS_VERIFY_IP=""
