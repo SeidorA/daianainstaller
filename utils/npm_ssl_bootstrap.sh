@@ -488,6 +488,12 @@ extract_nip_io_ip() {
   return 1
 }
 
+is_ipv4_or_nip_io_domain() {
+  local domain="$1"
+  is_ipv4_address "$domain" && return 0
+  [[ "$domain" == *.nip.io ]] && extract_nip_io_ip "$domain" >/dev/null
+}
+
 derive_tls_verify_ip() {
   local domain="$1" encoded_ip="" explicit_ip="${NPM_TLS_VERIFY_IP:-}"
 
@@ -651,7 +657,9 @@ tls_domain_for_service() {
   local prefix domain_var
   prefix="$1"
   domain_var="DOMAIN_$(printf '%s' "$prefix" | tr '[:lower:]' '[:upper:]')"
-  if [[ -n "${!domain_var:-}" ]]; then
+  if [[ "$prefix" == "daiana" ]] && is_ipv4_or_nip_io_domain "$BASE_DOMAIN"; then
+    printf '%s.%s' "$prefix" "$BASE_DOMAIN"
+  elif [[ -n "${!domain_var:-}" ]]; then
     printf '%s' "${!domain_var}"
   elif [[ "$BASE_DOMAIN" == "${prefix}."* ]]; then
     printf '%s' "$BASE_DOMAIN"
@@ -1920,21 +1928,9 @@ main() {
     upper_prefix="$(echo "$prefix" | tr '[:lower:]' '[:upper:]')"
     up_host_var="HOST_${upper_prefix}"
     up_port_var="PORT_${upper_prefix}"
-    domain_var="DOMAIN_${upper_prefix}"
     up_host="${!up_host_var:-$default_host}"
     up_port="${!up_port_var:-$default_port}"
-    custom_domain="${!domain_var:-}"
-
-    if [[ -n "$custom_domain" ]]; then
-      domain="$custom_domain"
-    else
-      # Si BASE_DOMAIN ya incluye el prefijo, evita duplicarlo (ej: base=daiana.dnains.duckdns.org)
-      if [[ "$BASE_DOMAIN" == "${prefix}."* ]]; then
-        domain="$BASE_DOMAIN"
-      else
-        domain="${prefix}.${BASE_DOMAIN}"
-      fi
-    fi
+    domain="$(tls_domain_for_service "$prefix")"
 
     case "$TLS_MODE" in
       none)
