@@ -21,7 +21,7 @@ Confirm these items first:
 - Docker Hub credentials are available if private Daiana images must be pulled.
 - You know the base domain, for example `daianains.seidoranalytics.com`.
 
-When `BASE_DOMAIN` is empty in an interactive install, the installer detects the current private IPv4 and displays `<ip>.nip.io` as the prompt default. Press Enter to accept that local hostname, or type a normal DNS domain to use it instead. Non-interactive installs do not guess a domain: they fail unless `BASE_DOMAIN` is set explicitly. The `DAIANA_LOCAL_INSTALL=1` mode continues to select and persist the detected private-IP `nip.io` domain automatically.
+When `BASE_DOMAIN` is empty in an interactive install, the installer detects the current private IPv4 and displays `<ip>.nip.io` as the prompt default. Press Enter to accept that local hostname, or type a normal DNS domain to use it instead. Non-interactive installs do not guess a domain: they fail unless `BASE_DOMAIN` is set explicitly. The `DAIANA_LOCAL_INSTALL=1` mode continues to select and persist the detected private-IP `nip.io` domain automatically. It also persists HTTP-compatible WebUI cookies (`SameSite=lax`, `Secure=false`) so local HTTP access works; production defaults remain `SameSite=none`, `Secure=true`.
 
 Daiana hostname rules depend on the base-domain type. For a normal DNS domain, Daiana uses `BASE_DOMAIN` itself; for an IP address or an `*.nip.io` domain, it uses `daiana.<BASE_DOMAIN>`. Other services keep their prefix, such as `supa.<BASE_DOMAIN>` and `api.<BASE_DOMAIN>`.
 
