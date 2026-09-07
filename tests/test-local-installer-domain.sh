@@ -11,6 +11,7 @@ awk '/^load_dotenv\(\)/,/^}/' "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/env-func
 awk '/^persist_env_value\(\)/,/^}/' "$ROOT_DIR/install-daiana.sh" >> "$TMP_DIR/env-functions.sh"
 awk '/^detect_local_ipv4\(\)/,/^if \[ -z "\$BASE_DOMAIN" \]/{ if ($0 !~ /^if \[ -z "\$BASE_DOMAIN"/) print }' \
   "$ROOT_DIR/install-daiana.sh" > "$TMP_DIR/local-domain.sh"
+awk '/^prompt_missing\(\)/,/^}/' "$ROOT_DIR/install-daiana.sh" >> "$TMP_DIR/local-domain.sh"
 
 cat > "$MOCK_BIN/uname" <<'MOCK'
 #!/usr/bin/env bash
@@ -41,4 +42,26 @@ chmod +x "$MOCK_BIN/uname" "$MOCK_BIN/route" "$MOCK_BIN/ipconfig"
 )
 
 grep -qx 'BASE_DOMAIN=10.20.30.40.nip.io' "$TMP_DIR/.env"
-printf 'local installer domain persistence test passed\n'
+
+(
+  cd "$TMP_DIR"
+  PATH="$MOCK_BIN:$PATH"
+  export DAIANA_LOCAL_INSTALL=0
+  # shellcheck source=/dev/null
+  source "$TMP_DIR/local-domain.sh"
+  BASE_DOMAIN=""
+  # shellcheck disable=SC2329
+  prompt() {
+    printf '%s' "${PROMPT_REPLY:-$2}"
+  }
+  default_domain="$(base_domain_prompt_default)"
+  [[ "$default_domain" == "10.20.30.40.nip.io" ]]
+  prompt_missing BASE_DOMAIN "$default_domain"
+  [[ "$BASE_DOMAIN" == "10.20.30.40.nip.io" ]]
+
+  BASE_DOMAIN='daiana.example.com'
+  prompt_missing BASE_DOMAIN "$default_domain"
+  [[ "$BASE_DOMAIN" == "daiana.example.com" ]]
+)
+
+printf 'local installer domain persistence and interactive default tests passed\n'
