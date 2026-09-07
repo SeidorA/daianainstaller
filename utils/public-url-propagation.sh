@@ -36,6 +36,43 @@ public_url_scheme() {
   esac
 }
 
+public_url_is_ipv4_address() {
+  local address="$1" octet
+  local -a octets
+  [[ "$address" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]] || return 1
+  IFS='.' read -r -a octets <<<"$address"
+  for octet in "${octets[@]}"; do
+    (( octet <= 255 )) || return 1
+  done
+}
+
+public_url_extract_nip_io_ip() {
+  local host="$1" candidate
+  if [[ "$host" =~ (^|\.)([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\.nip\.io$ ]]; then
+    candidate="${BASH_REMATCH[2]}"
+    public_url_is_ipv4_address "$candidate" || return 1
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+public_url_is_ipv4_or_nip_io_domain() {
+  local domain="$1"
+  public_url_is_ipv4_address "$domain" && return 0
+  [[ "$domain" == *.nip.io ]] && public_url_extract_nip_io_ip "$domain" >/dev/null
+}
+
+daiana_host_for_domain() {
+  local domain="${1:-${BASE_DOMAIN:-}}"
+  [[ -n "$domain" ]] || return 1
+  if public_url_is_ipv4_or_nip_io_domain "$domain"; then
+    printf 'daiana.%s' "$domain"
+  else
+    printf '%s' "$domain"
+  fi
+}
+
 public_url_value_for_key() {
   local key="$1" domain="${BASE_DOMAIN:-}" scheme="${2:-}"
   [[ "$domain" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] || return 1
@@ -45,7 +82,7 @@ public_url_value_for_key() {
     STUDIO_BASE_URL) printf '%s://studio.%s' "$scheme" "$domain" ;;
     SUPABASE_PUBLIC_URL) printf '%s://supa.%s' "$scheme" "$domain" ;;
     API_EXTERNAL_URL) printf '%s://supa.%s/auth/v1' "$scheme" "$domain" ;;
-    SITE_URL|CORS_ALLOW_ORIGIN|NEXT_PUBLIC_APP_URL) printf '%s://daiana.%s' "$scheme" "$domain" ;;
+    SITE_URL|CORS_ALLOW_ORIGIN|NEXT_PUBLIC_APP_URL) printf '%s://%s' "$scheme" "$(daiana_host_for_domain "$domain")" ;;
     WEBUI_BASE_URL) printf '%s://webui.%s' "$scheme" "$domain" ;;
     BACKEND_BASE_URL) printf '%s://api.%s' "$scheme" "$domain" ;;
     WS_BASE_URL) printf '%s://whatsapp.%s' "$scheme" "$domain" ;;
@@ -319,7 +356,7 @@ public_url_value_for_vault_name() {
     NEXT_PUBLIC_API_WHATSAPP) host="whatsapp.$domain" ;;
     NEXT_PUBLIC_API_STUDIO_BASE_URL) host="studio.$domain" ;;
     NEXT_PUBLIC_WEBUI_URL) host="webui.$domain" ;;
-    NEXT_PUBLIC_APP_URL) host="daiana.$domain" ;;
+    NEXT_PUBLIC_APP_URL) host="$(daiana_host_for_domain "$domain")" ;;
     *) return 1 ;;
   esac
   printf '%s://%s' "$scheme" "$host"
@@ -386,3 +423,115 @@ vault_verify_public_url_entries() {
   vault_psql_with_password -X -q -U "${VAULT_DB_USER:-supabase_admin}" -d "${POSTGRES_DB:-postgres}" \
     -v ON_ERROR_STOP=1 -c "$sql" >/dev/null
 }
+
+portainer_api_request() (
+  case "$-" in *x*) set +x ;; esac
+  local method="$1" path="$2" data_file="${3:-}" config response status curl_status=0
+  local api_url="${PORTAINER_URL:-http://127.0.0.1:9000}"
+  config="$(mktemp "${TMPDIR:-/tmp}/daiana-portainer.XXXXXX")" || return 1
+  trap 'rm -f "$config"' EXIT
+  {
+    printf 'silent\nshow-error\nrequest = "%s"\nurl = "%s%s"\n' "$method" "$api_url" "$path"
+    printf 'header = "Content-Type: application/json"\n'
+    if [[ -n "${PORTAINER_TOKEN:-}" ]]; then
+      printf 'header = "Authorization: Bearer %s"\n' "$PORTAINER_TOKEN"
+    fi
+    if [[ -n "$data_file" ]]; then
+      printf 'data-binary = "@%s"\n' "$data_file"
+    fi
+  } > "$config" || return 1
+  response="$(curl --config "$config" -w '\n%{http_code}')" || curl_status=$?
+  status="${response##*$'\n'}"
+  response="${response%$'\n'*}"
+  if [[ "$curl_status" -ne 0 || "$status" != 2* ]]; then
+    printf 'ERROR: Portainer %s %s failed (HTTP %s)\n' "$method" "$path" "${status:-unavailable}" >&2
+    if [[ "$curl_status" -ne 0 ]]; then
+      return "$curl_status"
+    fi
+    return 1
+  fi
+  printf '%s' "$response"
+)
+
+portainer_refresh_stack_env() (
+  case "$-" in *x*) set +x ;; esac
+  local auth_payload auth_user auth_pass auth_response endpoint_id stacks stack_id stack_file_response
+  local stack_file stack_response public_values updated_env body_file
+  local PORTAINER_URL="${PORTAINER_URL:-http://127.0.0.1:9000}"
+  local APP_STACK_NAME="${APP_STACK_NAME:-daiana-app}"
+  local PORTAINER_TOKEN="${PORTAINER_TOKEN:-}"
+  local PORTAINER_ADMIN_USER="${PORTAINER_ADMIN_USER:-admin}"
+  local PORTAINER_ADMIN_PASS="${PORTAINER_ADMIN_PASS:-${NPM_ADMIN_PASS:-}}"
+  local env_file="${1:-.env}"
+  local temp_dir
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/daiana-portainer-refresh.XXXXXX")" || return 1
+  trap 'rm -rf "$temp_dir"' EXIT
+
+  if [[ -z "$PORTAINER_TOKEN" ]]; then
+    [[ -n "$PORTAINER_ADMIN_USER" && -n "$PORTAINER_ADMIN_PASS" ]] || {
+      printf '%s\n' 'ERROR: Portainer credentials are required for controlled stack refresh' >&2
+      return 1
+    }
+    auth_payload="$temp_dir/auth.json"
+    auth_user="$temp_dir/user"
+    auth_pass="$temp_dir/pass"
+    printf '%s' "$PORTAINER_ADMIN_USER" > "$auth_user" || return 1
+    printf '%s' "$PORTAINER_ADMIN_PASS" > "$auth_pass" || return 1
+    chmod 600 "$auth_user" "$auth_pass"
+    jq -n --rawfile u "$auth_user" --rawfile p "$auth_pass" '{Username:$u,Password:$p}' > "$auth_payload" || return 1
+    PORTAINER_TOKEN=""
+    auth_response="$(portainer_api_request POST /api/auth "$auth_payload")" || return 1
+    PORTAINER_TOKEN="$(jq -er '(.jwt // .JWT) | select(type == "string" and length > 0)' <<<"$auth_response")" || return 1
+  fi
+
+  endpoint_id="$(portainer_api_request GET /api/endpoints | jq -er '
+    (if type == "object" and has("data") then .data else . end)
+    | [ .[]? | select(.Name == "local-docker" or .name == "local-docker" or .URL == "unix:///var/run/docker.sock" or .url == "unix:///var/run/docker.sock") | (.Id // .id) ]
+    | if length == 1 and (.[0] | (type == "number" or type == "string")) then .[0] else error("local Docker endpoint is not unique") end
+  ' )" || return 1
+  [[ "$endpoint_id" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  stacks="$(portainer_api_request GET /api/stacks)" || return 1
+  stack_id="$(jq -er --arg name "$APP_STACK_NAME" '
+    (if type == "object" and has("data") then .data else . end)
+    | [ .[]? | select((.Name // .name) == $name) | (.Id // .id) ]
+    | if length == 1 and (.[0] | (type == "number" or type == "string")) then .[0] else error("existing application stack is not unique") end
+  ' <<<"$stacks")" || return 1
+  [[ "$stack_id" =~ ^[1-9][0-9]*$ ]] || return 1
+
+  stack_file_response="$(portainer_api_request GET "/api/stacks/$stack_id/file?endpointId=$endpoint_id")" || return 1
+  stack_file="$temp_dir/stack.yml"
+  jq -jer '.StackFileContent // .stackFileContent | select(type == "string" and length > 0)' <<<"$stack_file_response" > "$stack_file" || return 1
+  stack_response="$(portainer_api_request GET "/api/stacks/$stack_id?endpointId=$endpoint_id")" || return 1
+  validate_public_env_file "$env_file" https || return 1
+
+  public_values="$(jq -n \
+    --arg studio "$(env_value "$env_file" STUDIO_BASE_URL)" \
+    --arg supabase "$(env_value "$env_file" SUPABASE_PUBLIC_URL)" \
+    --arg api_external "$(env_value "$env_file" API_EXTERNAL_URL)" \
+    --arg site "$(env_value "$env_file" SITE_URL)" \
+    --arg webui "$(env_value "$env_file" WEBUI_BASE_URL)" \
+    --arg backend "$(env_value "$env_file" BACKEND_BASE_URL)" \
+    --arg ws "$(env_value "$env_file" WS_BASE_URL)" \
+    --arg ms "$(env_value "$env_file" MS_BASE_URL)" \
+    --arg vanna "$(env_value "$env_file" VANNA_BASE_URL)" \
+    --arg qdrant "$(env_value "$env_file" QDRANT_BASE_URL)" \
+    --arg cors "$(env_value "$env_file" CORS_ALLOW_ORIGIN)" \
+    --arg app "$(env_value "$env_file" NEXT_PUBLIC_APP_URL)" \
+    '{STUDIO_BASE_URL:$studio,SUPABASE_PUBLIC_URL:$supabase,API_EXTERNAL_URL:$api_external,SITE_URL:$site,WEBUI_BASE_URL:$webui,BACKEND_BASE_URL:$backend,WS_BASE_URL:$ws,MS_BASE_URL:$ms,VANNA_BASE_URL:$vanna,QDRANT_BASE_URL:$qdrant,CORS_ALLOW_ORIGIN:$cors,NEXT_PUBLIC_APP_URL:$app}')" || return 1
+  updated_env="$(jq -cer --argjson values "$public_values" '
+    (.Env // .env) as $env
+    | if ($env | type) != "array" or any($env[]?; type != "object" or (.name | type) != "string" or (.value | type) != "string") then
+        error("Portainer stack Env is malformed")
+      else
+        ($env | map(if ($values[.name] | type) == "string" then .value = $values[.name] else . end)) as $updated
+        | $updated
+      end
+  ' <<<"$stack_response")" || return 1
+
+  body_file="$temp_dir/stack-update.json"
+  jq -n --arg name "$APP_STACK_NAME" --rawfile content "$stack_file" --argjson env "$updated_env" \
+    '{Name:$name,StackFileContent:$content,Env:$env,Prune:false,PullImage:false}' > "$body_file" || return 1
+  portainer_api_request PUT "/api/stacks/$stack_id?endpointId=$endpoint_id" "$body_file" >/dev/null || return 1
+  printf 'Portainer stack refreshed without image pull: %s\n' "$APP_STACK_NAME" >&2
+)
