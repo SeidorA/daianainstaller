@@ -1,6 +1,6 @@
 services:
   portainer:
-    image: portainer/portainer-ce:lts
+    image: portainer/portainer-ce:2.45.0
     container_name: portainer
     restart: unless-stopped
     command: --no-setup-token
