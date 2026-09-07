@@ -18,6 +18,13 @@ See per-service updates below for details. Only the most important changes relev
 - ⚠️ **Breaking change** (week of July 6, 2026): Access to the OpenAPI spec at `/rest/v1/` via the anon (publishable) key will be removed. Requests using the service role or new secret keys are unaffected, and data access via `/rest/v1/your_table` or any client library continues to work as it does today. See discussion [#42949](https://github.com/orgs/supabase/discussions/42949).
 - ⚠️ **Breaking change** (week of July 6, 2026): `API_EXTERNAL_URL` will be updated to include the `/auth/v1` path prefix (e.g. `http://localhost:8000/auth/v1`), aligning self-hosted with the platform and CLI. This makes custom OAuth providers work out of the box and moves SAML SSO endpoints to `/auth/v1/sso/saml/*`. See discussion [#47093](https://github.com/orgs/supabase/discussions/47093).
 
+## [0.4.5](https://github.com/SeidorA/daianainstaller/compare/daiana-installer-v0.4.4...daiana-installer-v0.4.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* **portainer:** pin stable 2.45.0 image ([#79](https://github.com/SeidorA/daianainstaller/issues/79)) ([#80](https://github.com/SeidorA/daianainstaller/issues/80)) ([5c1cca2](https://github.com/SeidorA/daianainstaller/commit/5c1cca29e359922ef0a22eba3d3abc4ce61a9c1a))
+
 ## [0.4.4](https://github.com/SeidorA/daianainstaller/compare/daiana-installer-v0.4.3...daiana-installer-v0.4.4) (2026-09-07)
 
 
