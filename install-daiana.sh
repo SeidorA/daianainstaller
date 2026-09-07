@@ -660,8 +660,20 @@ if [ "$DAIANA_LOCAL_INSTALL" = "1" ]; then
   log "Local installation detected; using BASE_DOMAIN=$BASE_DOMAIN"
 fi
 
+base_domain_prompt_default() {
+  local local_ipv4
+  local_ipv4="$(detect_local_ipv4 || true)"
+  if [ -n "$local_ipv4" ]; then
+    printf '%s.nip.io' "$local_ipv4"
+  fi
+}
+
 if [ -z "$BASE_DOMAIN" ] && [ ! -t 0 ]; then
   die "BASE_DOMAIN is required. Run in an interactive terminal or export BASE_DOMAIN=your.domain before launching."
+fi
+base_domain_default=""
+if [ -z "$BASE_DOMAIN" ] && [ -t 0 ] && [ -r /dev/tty ]; then
+  base_domain_default="$(base_domain_prompt_default)"
 fi
 if [ -t 0 ] && [ -r /dev/tty ]; then
   log "Interactive mode detected; missing values will be prompted one by one."
@@ -888,7 +900,7 @@ ensure_secret() {
   fi
 }
 
-prompt_missing BASE_DOMAIN
+prompt_missing BASE_DOMAIN "$base_domain_default"
 [ -n "$BASE_DOMAIN" ] || die "BASE_DOMAIN is required"
 prompt_missing NPM_ADMIN_EMAIL 'admin@example.com'
 

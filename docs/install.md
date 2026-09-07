@@ -31,9 +31,12 @@ What it does:
 7. optional integrations
 
 ## Important defaults
+- `BASE_DOMAIN`: when it is empty during an interactive install, the installer detects the current private IPv4 and displays `<ip>.nip.io` as the default; pressing Enter accepts it. Non-interactive installs still require an explicit `BASE_DOMAIN`.
 - `NPM_ADMIN_EMAIL`: `admin@example.com`
 - `LICENSE_ACTIVATION_BASE_URL`: `https://license.example.com`
 - SMTP placeholders in `.env.example` are treated as empty on first run
+
+Daiana hostnames follow the base-domain type: with a normal DNS domain, Daiana is hosted at `BASE_DOMAIN` itself (for example, `daianains.seidoranalytics.com`). With an IP address or an `*.nip.io` domain, Daiana is hosted at `daiana.<BASE_DOMAIN>` so the IP-backed hostname remains distinct from the other service prefixes.
 
 ## Database migrations
 
