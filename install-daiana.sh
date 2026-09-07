@@ -819,19 +819,29 @@ ensure_secret() {
     fi
   }
 
+  daiana_host_for_domain() {
+    local domain="$1"
+    if [[ "$domain" == *.nip.io || "$domain" =~ ^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$ ]]; then
+      printf 'daiana.%s' "$domain"
+    else
+      printf '%s' "$domain"
+    fi
+  }
+
   log "Deriving public URLs from BASE_DOMAIN"
+  daiana_public_host="$(daiana_host_for_domain "$BASE_DOMAIN")"
   ensure_derived STUDIO_BASE_URL "${public_scheme}://studio.${BASE_DOMAIN}"
   ensure_derived SUPABASE_PUBLIC_URL "${public_scheme}://supa.${BASE_DOMAIN}"
   ensure_derived API_EXTERNAL_URL "${public_scheme}://supa.${BASE_DOMAIN}/auth/v1"
-  ensure_derived SITE_URL "${public_scheme}://daiana.${BASE_DOMAIN}"
+  ensure_derived SITE_URL "${public_scheme}://${daiana_public_host}"
   ensure_derived WEBUI_BASE_URL "${public_scheme}://webui.${BASE_DOMAIN}"
   ensure_derived BACKEND_BASE_URL "${public_scheme}://api.${BASE_DOMAIN}"
   ensure_derived WS_BASE_URL "${public_scheme}://whatsapp.${BASE_DOMAIN}"
   ensure_derived MS_BASE_URL "${public_scheme}://msteams.${BASE_DOMAIN}"
   ensure_derived VANNA_BASE_URL "${public_scheme}://vanna.${BASE_DOMAIN}"
   ensure_derived QDRANT_BASE_URL "${public_scheme}://qdrant.${BASE_DOMAIN}"
-  ensure_derived CORS_ALLOW_ORIGIN "${public_scheme}://daiana.${BASE_DOMAIN}"
-  ensure_derived NEXT_PUBLIC_APP_URL "${public_scheme}://daiana.${BASE_DOMAIN}"
+  ensure_derived CORS_ALLOW_ORIGIN "${public_scheme}://${daiana_public_host}"
+  ensure_derived NEXT_PUBLIC_APP_URL "${public_scheme}://${daiana_public_host}"
   ensure_default FORWARDED_ALLOW_IPS "*"
   ensure_default SMTP_SECURE "true"
   ensure_default SMTP_HOST ""

@@ -37,6 +37,9 @@ BASE_DOMAIN=192.168.0.19.nip.io
 [[ "$(public_url_scheme)" == http ]]
 [[ "$(public_url_value_for_key SITE_URL)" == http://daiana.192.168.0.19.nip.io ]]
 [[ "$(public_url_value_for_key SITE_URL https)" == https://daiana.192.168.0.19.nip.io ]]
+BASE_DOMAIN=example.test
+[[ "$(public_url_value_for_key SITE_URL https)" == https://example.test ]]
+BASE_DOMAIN=192.168.0.19.nip.io
 
 cat > "$TMP_DIR/.env" <<'ENV'
 SUPABASE_PUBLIC_URL=http://supa.192.168.0.19.nip.io

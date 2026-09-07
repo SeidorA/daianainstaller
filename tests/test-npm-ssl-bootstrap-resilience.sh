@@ -53,6 +53,10 @@ cat > "$MOCK_BIN/openssl" <<'MOCK'
 #!/usr/bin/env bash
 set -u
 scenario="${NPM_TEST_SCENARIO:-}"
+if [[ "${1:-}" == x509 && "${2:-}" == -help ]]; then
+  printf '%s\n' ' -checkhost hostname'
+  exit 0
+fi
 case "$scenario" in
   custom-success|custom-tls-failure|custom-san-mismatch|custom-expired|custom-malformed) ;;
   *) exit 1 ;;

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/certificate-validation.sh"
+
 ensure_command() {
   local cmd="$1"
   if command -v "$cmd" >/dev/null 2>&1; then
@@ -613,7 +617,7 @@ ensure_local_certificate_files() {
 
   if [[ -f "$cert_path" && -f "$key_path" ]]; then
     for requested_domain in "$domain" "$@"; do
-      openssl x509 -in "$cert_path" -noout -checkhost "$requested_domain" >/dev/null 2>&1 || {
+      certificate_hostname_matches "$cert_path" "$requested_domain" || {
         echo "NPM local certificate SAN does not cover $requested_domain; refusing TLS mutation." >&2
         return 1
       }
@@ -646,7 +650,7 @@ ensure_local_certificate_files() {
   chmod 640 "$key_path"
   chgrp 65533 "$key_path" 2>/dev/null || true
   for requested_domain in "$domain" "$@"; do
-    openssl x509 -in "$cert_path" -noout -checkhost "$requested_domain" >/dev/null 2>&1 || {
+    certificate_hostname_matches "$cert_path" "$requested_domain" || {
       echo "Generated local certificate SAN does not cover $requested_domain; refusing TLS mutation." >&2
       return 1
     }
@@ -823,7 +827,7 @@ verify_certificate_metadata_for_domain() {
         echo "NPM certificate verification failed for $domain (custom PEM expired; response redacted)." >&2
         return 1
       fi
-      if ! openssl x509 -in "$cert_path" -noout -checkhost "$domain" >/dev/null 2>&1; then
+      if ! certificate_hostname_matches "$cert_path" "$domain"; then
         echo "NPM certificate verification failed for $domain (custom SAN/hostname mismatch; response redacted)." >&2
         return 1
       fi
