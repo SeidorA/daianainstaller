@@ -2,13 +2,25 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/utils/certificate-validation.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$TMP_DIR/utils"
 touch "$TMP_DIR/.env"
 cp "$ROOT_DIR/apply-certs.sh" "$TMP_DIR/apply-certs.sh"
+cp "$ROOT_DIR/utils/certificate-validation.sh" "$TMP_DIR/utils/certificate-validation.sh"
 cat > "$TMP_DIR/utils/public-url-propagation.sh" <<'URLS'
+daiana_host_for_domain() {
+  local domain="$1"
+  if [[ "$domain" == *.nip.io || "$domain" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    printf 'daiana.%s' "$domain"
+  else
+    printf '%s' "$domain"
+  fi
+}
+portainer_refresh_stack_env() { :; }
 stage_public_env_update() { cp "$1" "${1}.stage"; printf '%s\n' "${1}.stage"; }
 vault_snapshot_public_url_entries() { : > "$1"; }
 vault_snapshot_public_url_scheme() { printf 'http\n'; }
@@ -24,11 +36,18 @@ chmod +x "$TMP_DIR/update-daiana.sh"
 cat > "$TMP_DIR/utils/npm_ssl_bootstrap.sh" <<'BOOTSTRAP'
 #!/usr/bin/env bash
 set -euo pipefail
-# This is only the NPM process boundary mock.  Certificate generation and all
-# SAN assertions are performed by apply-certs.sh/openssl in this test.
+# shellcheck disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/certificate-validation.sh"
+# This is only the NPM process boundary mock. Certificate generation and all
+# SAN assertions use the shared certificate validation helper.
 [[ "${TLS_SAN_TEST_NPM_BOUNDARY:-}" == yes ]] || exit 97
 for host in api nginx port qdrant daiana studio supa whatsapp vanna webui msteams; do
-  openssl x509 -in "${NPM_LOCAL_CERT_FILE/#~/$HOME}" -noout -checkhost "$host.$BASE_DOMAIN" >/dev/null
+  if [[ "$host" == daiana ]]; then
+    domain="$BASE_DOMAIN"
+  else
+    domain="$host.$BASE_DOMAIN"
+  fi
+  certificate_hostname_matches "${NPM_LOCAL_CERT_FILE/#~/$HOME}" "$domain"
 done
 printf 'NPM_BOOTSTRAP_STATUS=SUCCESS\n'
 BOOTSTRAP
@@ -43,7 +62,12 @@ TLS_SAN_TEST_NPM_BOUNDARY=yes BASE_DOMAIN=example.test TLS_MODE=local NPM_ADMIN_
   NPM_ADMIN_PASS=redacted NPM_LOCAL_CERT_FILE="$TMP_DIR/all.crt" \
   NPM_LOCAL_KEY_FILE="$TMP_DIR/all.key" bash "$TMP_DIR/apply-certs.sh" >/dev/null
 for host in api nginx port qdrant daiana studio supa whatsapp vanna webui msteams; do
-  openssl x509 -in "$TMP_DIR/all.crt" -noout -checkhost "$host.example.test" >/dev/null
+  if [[ "$host" == daiana ]]; then
+    domain=example.test
+  else
+    domain="$host.example.test"
+  fi
+  certificate_hostname_matches "$TMP_DIR/all.crt" "$domain"
 done
 
 # A real SAN mismatch must fail before the child bootstrap can mutate hosts.

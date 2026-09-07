@@ -11,6 +11,7 @@ MOCK_BIN="$TMP_DIR/bin"
 mkdir -p "$TEST_ROOT/utils" "$MOCK_BIN"
 cp "$SCRIPT" "$TEST_ROOT/apply-certs.sh"
 cp "$ROOT_DIR/utils/public-url-propagation.sh" "$TEST_ROOT/utils/public-url-propagation.sh"
+cp "$ROOT_DIR/utils/certificate-validation.sh" "$TEST_ROOT/utils/certificate-validation.sh"
 
 cat > "$TEST_ROOT/.env" <<'ENV'
 BASE_DOMAIN=example.nip.io
