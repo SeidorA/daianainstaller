@@ -7,9 +7,10 @@ bash apply-certs.sh
 ```
 
 Apply completes NPM certificate setup, updates managed proxy hosts, verifies TLS,
-then projects public URLs into `.env` and Vault before invoking
-`update-daiana.sh --update`. The update recreates/redeploys the installer app
-stack, including Supabase and URL-consuming Daiana services.
+then projects public URLs into `.env` and Vault before refreshing the existing
+Portainer application stack with the same stack definition and `PullImage=false`.
+This controlled refresh recreates containers so they consume the new environment,
+without selecting or pulling images, applying migrations, or creating an image-update snapshot.
 
 The lifecycle has three explicit URL states: initial installation uses `http`
 for `*.nip.io` IP-DNS domains, applying any certificate switches all public
@@ -55,9 +56,12 @@ revoke the certificate at the ACME CA.
   Docker URLs, healthchecks, upstreams, and database URLs are never rewritten
 - stages and validates the complete public URL set before replacing
   `.env`, upserts the matching values in one Vault transaction, then refreshes
-  Portainer stacks
+  the existing Portainer application stack without image selection/pull or migrations
 - auto-generates local/self-signed cert files when `TLS_MODE=local` and the files are missing
 - supports `ONLY_PREFIX` to target a single proxy prefix (for example `port`, `nginx`, `supa`)
+- derives the Daiana host as exactly `BASE_DOMAIN` for normal DNS and as
+  `daiana.BASE_DOMAIN` for raw IPv4 or `.nip.io`; other service prefixes and
+  explicit service overrides remain unchanged
 
 ## Certificate verification semantics
 
@@ -67,7 +71,9 @@ revoke the certificate at the ACME CA.
 - Custom uploads are NPM provider `other`; `status=null` is valid and the API
   `domain_names` list is not treated as a SAN list. The configured local PEM is
   parsed, checked for expiry and the requested hostname/SAN, then used for a
-  trusted HTTPS GET. NPM expiry values in ISO `T...Z` and macOS space-formatted
+  trusted HTTPS GET. Hostname validation prefers OpenSSL `-checkhost` and falls
+  back to exact SAN DNS matching with single-label wildcards when unavailable;
+  CN-only certificates are rejected. NPM expiry values in ISO `T...Z` and macOS space-formatted
   `YYYY-MM-DD HH:MM:SS` form are accepted; ambiguous values fail closed.
 - For `*.nip.io` hosts, the trusted GET uses `--resolve` with the IPv4 address
   encoded by `BASE_DOMAIN`. `NPM_TLS_VERIFY_IP` may explicitly provide that
@@ -119,7 +125,10 @@ application fails. It never treats HTTP as a TLS fallback.
 Public propagation ordering is strict: certificate setup/upload, proxy-host
 mutation, and verification complete first; only a complete run without
 `ONLY_PREFIX` may stage the full HTTPS `.env` projection, replace `.env`, run
-one Vault transaction from that exact stage, and trigger the stack refresh.
+one Vault transaction from that exact stage, and trigger the controlled refresh
+of the existing Portainer application stack. The refresh reuses the exact current
+Portainer stack content and updates only the existing stack environment entries;
+it never creates a missing stack.
 These are separate resources, so the script does **not** claim cross-resource
 atomicity. If Vault or stack refresh fails it performs best-effort, verified
 compensation for both `.env` and Vault; a failed compensation retains redacted

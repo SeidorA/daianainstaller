@@ -10,6 +10,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/utils/public-url-propagation.sh"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/utils/certificate-validation.sh"
 
 DRY_RUN=0
 for arg in "$@"; do
@@ -69,7 +71,7 @@ ensure_local_certificate_files() {
 
   if [ -f "$cert_path" ] && [ -f "$key_path" ]; then
     for requested_domain in "$domain" "$@"; do
-      openssl x509 -in "$cert_path" -noout -checkhost "$requested_domain" >/dev/null 2>&1 \
+      certificate_hostname_matches "$cert_path" "$requested_domain" \
         || die "local certificate SAN does not cover $requested_domain"
     done
     return 0
@@ -100,7 +102,7 @@ ensure_local_certificate_files() {
   chmod 640 "$key_path"
   chgrp 65533 "$key_path" 2>/dev/null || true
   for requested_domain in "$domain" "$@"; do
-    openssl x509 -in "$cert_path" -noout -checkhost "$requested_domain" >/dev/null 2>&1 \
+    certificate_hostname_matches "$cert_path" "$requested_domain" \
       || die "generated local certificate SAN does not cover $requested_domain"
   done
 }
@@ -113,7 +115,9 @@ collect_local_tls_domains() {
       continue
     fi
     domain_var="DOMAIN_$(printf '%s' "$prefix" | tr '[:lower:]' '[:upper:]')"
-    if [[ -n "${!domain_var:-}" ]]; then
+    if [[ "$prefix" == "daiana" ]]; then
+      domain="$(daiana_host_for_domain "$BASE_DOMAIN")"
+    elif [[ -n "${!domain_var:-}" ]]; then
       domain="${!domain_var}"
     elif [[ "$BASE_DOMAIN" == "${prefix}."* ]]; then
       domain="$BASE_DOMAIN"
@@ -369,8 +373,8 @@ fi
 if [[ -z "${ONLY_PREFIX:-}" && "$TLS_MODE" != "none" ]]; then
    log "Refreshing persisted public URLs in .env according to the configured domain/TLS projection after complete verification"
   refresh_public_urls_in_env || die "Could not derive an unambiguous public URL set; refusing env/Vault mutation"
-  log "Refreshing Portainer stacks after the env and Vault update"
-  if ! bash update-daiana.sh --update; then
+  log "Refreshing the existing Portainer application stack with the updated environment"
+  if ! portainer_refresh_stack_env .env; then
     compensate_public_url_propagation || die "Stack refresh failed and public URL compensation was incomplete; no success claimed"
     die "Stack refresh failed; .env and Vault were compensated, but runtime stack state requires manual reconciliation"
   fi
