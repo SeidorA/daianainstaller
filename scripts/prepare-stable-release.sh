@@ -37,10 +37,26 @@ release_commit() {
 }
 
 validate_source_run() {
-  local run
-  run="$(gh api "repos/$SOURCE_REPOSITORY/actions/runs/$SOURCE_RUN_ID")" || die "Front source run $SOURCE_RUN_ID was not found"
-  jq -e --arg id "$SOURCE_RUN_ID" '(.id | tostring) == $id and .status == "completed" and .conclusion == "success"' <<<"$run" >/dev/null \
-    || die "Front source run does not match a successful dispatch"
+  local run status conclusion
+  local timeout_seconds="${SOURCE_RUN_TIMEOUT_SECONDS:-900}"
+  local poll_seconds="${SOURCE_RUN_POLL_SECONDS:-10}"
+  local deadline=$((SECONDS + timeout_seconds))
+
+  while true; do
+    run="$(gh api "repos/$SOURCE_REPOSITORY/actions/runs/$SOURCE_RUN_ID")" || die "Front source run $SOURCE_RUN_ID was not found"
+    status="$(jq -r '.status // empty' <<<"$run")"
+    conclusion="$(jq -r '.conclusion // empty' <<<"$run")"
+
+    if [ "$status" = "completed" ]; then
+      [ "$conclusion" = "success" ] || die "Front source run did not complete successfully: $conclusion"
+      return 0
+    fi
+
+    if (( SECONDS >= deadline )); then
+      die "Timed out waiting for Front source run $SOURCE_RUN_ID to complete"
+    fi
+    sleep "$poll_seconds"
+  done
 }
 
 registry_token() {
