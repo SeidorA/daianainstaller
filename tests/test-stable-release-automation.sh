@@ -75,7 +75,7 @@ pass "default pin updater handles intervening service keys and preserves exact i
 
 invalid_fixture="$TMP_DIR/invalid-docker-compose.app.yml"
 cp "$ROOT_DIR/docker-compose.app.yml" "$invalid_fixture"
-perl -0pi -e 's{(daianawhatsapp:\n[\s\S]*?image: )cloudseidoranalytics/daianawhatsapp:v2\.4\.1}{$1cloudseidoranalytics/not-daianawhatsapp:v2.4.1}' "$invalid_fixture"
+perl -0pi -e 's{(daianawhatsapp:\n[\s\S]*?image: )cloudseidoranalytics/daianawhatsapp:v2\.5\.0}{$1cloudseidoranalytics/not-daianawhatsapp:v2.5.0}' "$invalid_fixture"
 if (
   # shellcheck disable=SC1090
   source "$update_functions"
@@ -88,7 +88,7 @@ if (
 ) 2>"$TMP_DIR/invalid-update.err"; then
   fail "updater accepted a service block without its exact image"
 fi
-grep -Fq 'image: cloudseidoranalytics/not-daianawhatsapp:v2.4.1' "$invalid_fixture" \
+grep -Fq 'image: cloudseidoranalytics/not-daianawhatsapp:v2.5.0' "$invalid_fixture" \
   || fail "fail-closed pin validation changed the invalid fixture"
 pass "default pin updater fails closed when the exact service/image pair is absent"
 pass "stable release workflow fails closed and creates review-only PRs"
