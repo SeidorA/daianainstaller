@@ -4,7 +4,16 @@ services:
   daiananext:
     image: daiana-local:studio-provision
     pull_policy: never
+    environment:
+      NEXT_PUBLIC_API_PYTHON: http://daianapython:5002
 
   daianastudio:
     image: daianastudio-local:account-provision
     pull_policy: never
+
+  daianapython:
+    image: daianapython-local:dashboard-analytics
+    pull_policy: never
+    environment:
+      DB_USER: supabase_admin
+      DB_PASS: ${POSTGRES_PASSWORD}
