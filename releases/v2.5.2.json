@@ -1,0 +1,31 @@
+{
+  "schema_version": 3,
+  "deployment_mode": "complete-stack-replacement",
+  "images": {
+    "next": {
+      "reference": "cloudseidoranalytics/daiana@sha256:9669213430babfcd96140d35c9843bbe317d3f6244320bda38952c9536167142",
+      "index_digest": "sha256:9669213430babfcd96140d35c9843bbe317d3f6244320bda38952c9536167142",
+      "source_commit": "be93d716f685b4463a1a639254f326c91dd60779"
+    },
+    "python": {
+      "reference": "cloudseidoranalytics/daianapython@sha256:b4c0533c18e269b133149ceebf71edb62edd3cf3f2a9461ab159a434bfef3f36",
+      "index_digest": "sha256:b4c0533c18e269b133149ceebf71edb62edd3cf3f2a9461ab159a434bfef3f36",
+      "source_commit": "be93d716f685b4463a1a639254f326c91dd60779"
+    },
+    "vanna": {
+      "reference": "cloudseidoranalytics/daianavanna@sha256:9d725417b874ffb2406817c608efe19622d438c231170220d7fd9d045e0a08d2",
+      "index_digest": "sha256:9d725417b874ffb2406817c608efe19622d438c231170220d7fd9d045e0a08d2",
+      "source_commit": "be93d716f685b4463a1a639254f326c91dd60779"
+    },
+    "msteams": {
+      "reference": "cloudseidoranalytics/daianamsteams@sha256:18879e7a027313ebea0b0b729f77e6b3aa1bad0a84d62e74252f78c34b02d5ed",
+      "index_digest": "sha256:18879e7a027313ebea0b0b729f77e6b3aa1bad0a84d62e74252f78c34b02d5ed",
+      "source_commit": "be93d716f685b4463a1a639254f326c91dd60779"
+    },
+    "whatsapp": {
+      "reference": "cloudseidoranalytics/daianawhatsapp@sha256:f41a931f69fe6a703975789dee1ba0fe39d22bd013ec3a7c3db88c0fa529589b",
+      "index_digest": "sha256:f41a931f69fe6a703975789dee1ba0fe39d22bd013ec3a7c3db88c0fa529589b",
+      "source_commit": "be93d716f685b4463a1a639254f326c91dd60779"
+    }
+  }
+}
