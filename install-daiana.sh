@@ -864,6 +864,7 @@ ensure_secret() {
   ensure_derived QDRANT_BASE_URL "${public_scheme}://qdrant.${BASE_DOMAIN}"
   ensure_derived CORS_ALLOW_ORIGIN "${public_scheme}://${daiana_public_host}"
   ensure_derived NEXT_PUBLIC_APP_URL "${public_scheme}://${daiana_public_host}"
+  ensure_default STUDIO_PROVISIONING_URL "http://daianastudio:3000"
   ensure_default FORWARDED_ALLOW_IPS "*"
   ensure_default SMTP_SECURE "true"
   ensure_default SMTP_HOST ""
@@ -888,8 +889,8 @@ ensure_secret() {
   ensure_default GOOGLE_AUTH_PROVIDER_X509_CERT_URL "https://www.googleapis.com/oauth2/v1/certs"
   ensure_default GOOGLE_CLIENT_X509_CERT_URL ""
   ensure_default GOOGLE_DRIVE_CREDENTIALS ""
-  ensure_default GOOGLE_MODEL ""
-  ensure_default GOOGLE_EMBEDDING_MODEL ""
+  ensure_default GOOGLE_MODEL "gemini-2.5-flash-lite"
+  ensure_default GOOGLE_EMBEDDING_MODEL "gemini-embedding-001"
   ensure_default GOOGLE_UNIVERSE_DOMAIN "googleapis.com"
   ensure_default GOOGLE_SECRET ""
   ensure_secret FLOWISE_SECRETKEY_OVERWRITE 64
@@ -902,6 +903,7 @@ ensure_secret() {
   ensure_secret BOT_SECRET_KEY 64
   ensure_secret AUTH_KEY 64
   ensure_secret STUDIO_PROVISIONING_SECRET 64
+  ensure_secret TEAMS_INTERNAL_AUTH_SECRET 64
 
   if [ "$changed" = "1" ]; then
     CURRENT_PHASE="refreshing env after Daiana defaults"
